@@ -1,8 +1,9 @@
-use byteorder::{LittleEndian, BigEndian, ReadBytesExt}; // 1.2.7
+use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
 use std::{
     fs::File,
-    io::{self, Read},
+    io::{Read, Seek, BufRead}
 };
+use nnsdk::ui2d::ResPane;
 
 pub struct BflytHeader {
     signature: String,
@@ -20,17 +21,17 @@ pub struct BflytFile {
 
 
 impl BflytFile {
-    pub fn new_from_file(filename: &str) -> Result<(), std::io::Error> {
+    pub fn new_from_file(filename: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut file = File::open(filename)?;
 
         // Read the magic number
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic)?;
         if magic != "FLYT".as_bytes() {
-            return Err(std::io::Error::new(
+            return Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Invalid magic number",
-            ));
+            )));
         }
         
         let signature = u32::from_le_bytes(magic);
@@ -51,11 +52,33 @@ impl BflytFile {
             let mut curr_signature = [0u8; 4];
             file.read_exact(&mut curr_signature)?;
             let curr_signature = std::str::from_utf8(&curr_signature)?;
-            // match curr_signature {
-            //     "TXL1" => ,
+            println!("Current Section Signature: {curr_signature}");
+            let length = file.read_u32::<LittleEndian>()? as usize;
+            println!("Length: {length}");
+            let mut data = vec![0u8; length - 8];
+            file.read_exact(&mut data)?;
+            let mut data = std::io::Cursor::new(data);
+            match curr_signature {
+                "txl1" => {
+                    let tex_count = data.read_i32::<LittleEndian>()?;
+                    let base_offset = data.stream_position()?;
+                    println!("Num Textures: {tex_count}, Base Offset: {base_offset}");
 
-            // }
+                    let mut offsets = vec![0i32; tex_count as usize];
+                    // data.read_exact(&mut offsets);
+                    data.read_i32_into::<LittleEndian>(offsets.as_mut_slice())?;
+                    for offset in offsets {
+                        data.seek(std::io::SeekFrom::Start(base_offset + offset as u64))?;
+                        let mut bytes = Vec::new();
+                        data.read_until(b'\0', &mut bytes)?;
 
+                        // Convert the byte vector to a string
+                        let texture_name = String::from_utf8(bytes).unwrap();
+                        println!("Texture: {texture_name}");
+                    }
+                },
+                _ => (),
+            }
         }
 
         Ok(())
