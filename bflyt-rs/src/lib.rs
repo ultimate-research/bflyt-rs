@@ -1,9 +1,11 @@
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
+use nnsdk::ui2d::{
+    ResColor, ResPane, ResPicture as ResPictureBase, ResPictureWithTex, ResVec2, ResVec3,
+};
 use std::{
     fs::File,
-    io::{Cursor, Read, Seek, BufRead}
+    io::{BufRead, Cursor, Read, Seek},
 };
-use nnsdk::ui2d::{ResPane, ResVec3};
 
 pub struct BflytHeader {
     signature: String,
@@ -15,8 +17,14 @@ pub struct BflytHeader {
     padding: u16,
 }
 
+#[derive(Debug)]
+pub struct ResPicture {
+    pub picture: ResPictureBase,
+    pub tex_coords: Vec<Vec<ResVec2>>,
+}
+
 pub struct BflytFile {
-    header: BflytHeader
+    header: BflytHeader,
 }
 
 impl BflytFile {
@@ -32,7 +40,7 @@ impl BflytFile {
                 "Invalid magic number",
             )));
         }
-        
+
         let signature = u32::from_le_bytes(magic);
         let byte_order = file.read_u16::<LittleEndian>()?;
         if byte_order == 0xFFE {
@@ -78,10 +86,13 @@ impl BflytFile {
                         let texture_name = String::from_utf8(bytes).unwrap();
                         println!("Texture: {texture_name}");
                     }
-                },
+                }
                 "pan1" => {
                     println!("Kind: {kind_str}");
-                    println!("Length: {size}; Expecting {}", std::mem::size_of::<ResPane>());
+                    println!(
+                        "Length: {size}; Expecting {}",
+                        std::mem::size_of::<ResPane>()
+                    );
                     let flag = data.read_u8()?;
                     let base_position = data.read_u8()?;
                     let alpha = data.read_u8()?;
@@ -111,7 +122,11 @@ impl BflytFile {
                         flag_ex,
                         name,
                         user_data,
-                        pos: ResVec3 { x: pos_x, y: pos_y, z: pos_z },
+                        pos: ResVec3 {
+                            x: pos_x,
+                            y: pos_y,
+                            z: pos_z,
+                        },
                         rot_x,
                         rot_y,
                         rot_z,
@@ -122,8 +137,97 @@ impl BflytFile {
                     };
 
                     println!("{res_pane:#?}");
-                },
-                _ => ()
+                }
+                "pic1" => {
+                    println!("Kind: {kind_str}");
+                    println!(
+                        "Length: {size}; Expecting {}",
+                        std::mem::size_of::<ResPicture>()
+                    );
+                    let flag = data.read_u8()?;
+                    let base_position = data.read_u8()?;
+                    let alpha = data.read_u8()?;
+                    let flag_ex = data.read_u8()?;
+                    let mut name = [0u8; 24];
+                    data.read_exact(&mut name)?;
+                    let mut user_data = [0u8; 8];
+                    data.read_exact(&mut user_data)?;
+
+                    let pos_x = data.read_f32::<LittleEndian>()?;
+                    let pos_y = data.read_f32::<LittleEndian>()?;
+                    let pos_z = data.read_f32::<LittleEndian>()?;
+                    let rot_x = data.read_f32::<LittleEndian>()?;
+                    let rot_y = data.read_f32::<LittleEndian>()?;
+                    let rot_z = data.read_f32::<LittleEndian>()?;
+                    let scale_x = data.read_f32::<LittleEndian>()?;
+                    let scale_y = data.read_f32::<LittleEndian>()?;
+                    let size_x = data.read_f32::<LittleEndian>()?;
+                    let size_y = data.read_f32::<LittleEndian>()?;
+                    let mut vtx_cols = [[0u8; 4]; 4];
+
+                    for i in 0..vtx_cols.len() {
+                        data.read_exact(&mut vtx_cols[i]);
+                    }
+
+                    let material_idx = data.read_u16::<LittleEndian>()?;
+                    let tex_coord_count = data.read_u8()?;
+                    let flags = data.read_u8()?;
+
+                    let mut texture_coords = Vec::new();
+                    for i in 0..4 {
+                        texture_coords.push(Vec::new());
+
+                        for j in 0..tex_coord_count {
+                            let mut tex_coord = [0f32; 2];
+                            data.read_f32_into::<LittleEndian>(&mut tex_coord)?;
+
+                            // let mut offsets = vec![0i32; tex_count as usize];
+                            // data.read_i32_into::<LittleEndian>(offsets.as_mut_slice())?;
+
+                            texture_coords[i].push(ResVec2::new(tex_coord[0], tex_coord[1]));
+                        }
+                    }
+
+                    let res_pane = ResPicture {
+                        picture: ResPictureBase {
+                            pane: ResPane {
+                                block_header_kind: kind,
+                                block_header_size: size,
+                                flag,
+                                base_position,
+                                alpha,
+                                flag_ex,
+                                name,
+                                user_data,
+                                pos: ResVec3 {
+                                    x: pos_x,
+                                    y: pos_y,
+                                    z: pos_z,
+                                },
+                                rot_x,
+                                rot_y,
+                                rot_z,
+                                scale_x,
+                                scale_y,
+                                size_x,
+                                size_y,
+                            },
+                            vtx_cols: vtx_cols.map(|color| ResColor {
+                                r: color[0],
+                                g: color[1],
+                                b: color[2],
+                                a: color[3],
+                            }),
+                            material_idx,
+                            tex_coord_count,
+                            flags,
+                        },
+                        tex_coords: texture_coords,
+                    };
+
+                    println!("{res_pane:#?}");
+                }
+                _ => (),
             }
         }
 
