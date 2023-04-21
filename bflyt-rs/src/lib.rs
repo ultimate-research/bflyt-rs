@@ -1,9 +1,9 @@
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
 use std::{
     fs::File,
-    io::{Read, Seek, BufRead}
+    io::{Cursor, Read, Seek, BufRead}
 };
-use nnsdk::ui2d::ResPane;
+use nnsdk::ui2d::{ResPane, ResVec3};
 
 pub struct BflytHeader {
     signature: String,
@@ -18,7 +18,6 @@ pub struct BflytHeader {
 pub struct BflytFile {
     header: BflytHeader
 }
-
 
 impl BflytFile {
     pub fn new_from_file(filename: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -49,17 +48,20 @@ impl BflytFile {
         println!("{signature:x}, {byte_order:x}, {header_size:x}, {version:x}, {file_size:x}, {section_count:x}, {padding:x}");
 
         for _ in 0..section_count {
-            let mut curr_signature = [0u8; 4];
-            file.read_exact(&mut curr_signature)?;
-            let curr_signature = std::str::from_utf8(&curr_signature)?;
-            println!("Current Section Signature: {curr_signature}");
-            let length = file.read_u32::<LittleEndian>()? as usize;
-            println!("Length: {length}");
-            let mut data = vec![0u8; length - 8];
+            let mut kind_bytes = [0u8; 4];
+            file.read_exact(&mut kind_bytes)?;
+            let kind = u32::from_le_bytes(kind_bytes);
+            let size = file.read_u32::<LittleEndian>()?;
+            let mut data = vec![0u8; size as usize - 8];
             file.read_exact(&mut data)?;
-            let mut data = std::io::Cursor::new(data);
-            match curr_signature {
+            let mut data = Cursor::new(data);
+
+            let kind_str = std::str::from_utf8(&kind_bytes)?;
+
+            match kind_str {
                 "txl1" => {
+                    println!("Current Section Signature: {kind_str}");
+                    println!("Length: {size}");
                     let tex_count = data.read_i32::<LittleEndian>()?;
                     let base_offset = data.stream_position()?;
                     println!("Num Textures: {tex_count}, Base Offset: {base_offset}");
@@ -77,7 +79,51 @@ impl BflytFile {
                         println!("Texture: {texture_name}");
                     }
                 },
-                _ => (),
+                "pan1" => {
+                    println!("Kind: {kind_str}");
+                    println!("Length: {size}; Expecting {}", std::mem::size_of::<ResPane>());
+                    let flag = data.read_u8()?;
+                    let base_position = data.read_u8()?;
+                    let alpha = data.read_u8()?;
+                    let flag_ex = data.read_u8()?;
+                    let mut name = [0u8; 24];
+                    data.read_exact(&mut name)?;
+                    let mut user_data = [0u8; 8];
+                    data.read_exact(&mut user_data)?;
+
+                    let pos_x = data.read_f32::<LittleEndian>()?;
+                    let pos_y = data.read_f32::<LittleEndian>()?;
+                    let pos_z = data.read_f32::<LittleEndian>()?;
+                    let rot_x = data.read_f32::<LittleEndian>()?;
+                    let rot_y = data.read_f32::<LittleEndian>()?;
+                    let rot_z = data.read_f32::<LittleEndian>()?;
+                    let scale_x = data.read_f32::<LittleEndian>()?;
+                    let scale_y = data.read_f32::<LittleEndian>()?;
+                    let size_x = data.read_f32::<LittleEndian>()?;
+                    let size_y = data.read_f32::<LittleEndian>()?;
+
+                    let res_pane = ResPane {
+                        block_header_kind: kind,
+                        block_header_size: size,
+                        flag,
+                        base_position,
+                        alpha,
+                        flag_ex,
+                        name,
+                        user_data,
+                        pos: ResVec3 { x: pos_x, y: pos_y, z: pos_z },
+                        rot_x,
+                        rot_y,
+                        rot_z,
+                        scale_x,
+                        scale_y,
+                        size_x,
+                        size_y,
+                    };
+
+                    println!("{res_pane:#?}");
+                },
+                _ => ()
             }
         }
 
