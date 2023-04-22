@@ -1,7 +1,5 @@
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
-use nnsdk::ui2d::{
-    ResColor, ResPane, ResPicture as ResPictureBase, ResPictureWithTex, ResVec2, ResVec3,
-};
+use nnsdk::ui2d::{ResColor, ResPane, ResPicture as ResPictureBase, ResTextBox, ResVec2, ResVec3};
 use std::{
     fs::File,
     io::{BufRead, Cursor, Read, Seek},
@@ -177,7 +175,7 @@ impl BflytFile {
                     for i in 0..4 {
                         texture_coords.push(Vec::new());
 
-                        for j in 0..tex_coord_count {
+                        for _j in 0..tex_coord_count {
                             let mut tex_coord = [0f32; 2];
                             data.read_f32_into::<LittleEndian>(&mut tex_coord)?;
 
@@ -188,7 +186,7 @@ impl BflytFile {
                         }
                     }
 
-                    let res_pane = ResPicture {
+                    let res_picture = ResPicture {
                         picture: ResPictureBase {
                             pane: ResPane {
                                 block_header_kind: kind,
@@ -225,7 +223,117 @@ impl BflytFile {
                         tex_coords: texture_coords,
                     };
 
-                    println!("{res_pane:#?}");
+                    println!("{res_picture:#?}");
+                }
+                "txt1" => {
+                    println!("Kind: {kind_str}");
+                    println!(
+                        "Length: {size}; Expecting {}",
+                        std::mem::size_of::<ResTextBox>()
+                    );
+                    let flag = data.read_u8()?;
+                    let base_position = data.read_u8()?;
+                    let alpha = data.read_u8()?;
+                    let flag_ex = data.read_u8()?;
+                    let mut name = [0u8; 24];
+                    data.read_exact(&mut name)?;
+                    let mut user_data = [0u8; 8];
+                    data.read_exact(&mut user_data)?;
+
+                    let pos_x = data.read_f32::<LittleEndian>()?;
+                    let pos_y = data.read_f32::<LittleEndian>()?;
+                    let pos_z = data.read_f32::<LittleEndian>()?;
+                    let rot_x = data.read_f32::<LittleEndian>()?;
+                    let rot_y = data.read_f32::<LittleEndian>()?;
+                    let rot_z = data.read_f32::<LittleEndian>()?;
+                    let scale_x = data.read_f32::<LittleEndian>()?;
+                    let scale_y = data.read_f32::<LittleEndian>()?;
+                    let size_x = data.read_f32::<LittleEndian>()?;
+                    let size_y = data.read_f32::<LittleEndian>()?;
+
+                    let text_buf_bytes = data.read_u16::<LittleEndian>()?;
+                    let text_string_bytes = data.read_u16::<LittleEndian>()?;
+                    let material_index = data.read_u16::<LittleEndian>()?;
+                    let font_index = data.read_u16::<LittleEndian>()?;
+                    let text_position = data.read_u8()?;
+                    let text_alignment = data.read_u8()?;
+                    let text_box_flag = data.read_u16::<LittleEndian>()?;
+                    let italic_ratio = data.read_f32::<LittleEndian>()?;
+                    let text_string_offset = data.read_u32::<LittleEndian>()?;
+
+                    let mut text_colors = [[0u8; 4]; 2];
+                    for i in 0..text_colors.len() {
+                        data.read_exact(&mut text_colors[i]);
+                    }
+
+                    let mut font_size = [0f32; 2];
+                    data.read_f32_into::<LittleEndian>(&mut font_size)?;
+
+                    let char_space = data.read_f32::<LittleEndian>()?;
+                    let line_space = data.read_f32::<LittleEndian>()?;
+                    let text_id_offset = data.read_u32::<LittleEndian>()?;
+
+                    let mut shadow_offset = [0f32; 2];
+                    data.read_f32_into::<LittleEndian>(&mut shadow_offset)?;
+
+                    let mut shadow_scale = [0f32; 2];
+                    data.read_f32_into::<LittleEndian>(&mut shadow_scale)?;
+
+                    let mut shadow_colors = [[0u8; 4]; 2];
+                    for i in 0..shadow_colors.len() {
+                        data.read_exact(&mut shadow_colors[i]);
+                    }
+
+                    let shadow_italic_ratio = data.read_f32::<LittleEndian>()?;
+                    let line_width_offset_offset = data.read_u32::<LittleEndian>()?;
+                    let per_character_transform_offset = data.read_u32::<LittleEndian>()?;
+
+                    let res_text_box = ResTextBox {
+                        pane: ResPane {
+                            block_header_kind: kind,
+                            block_header_size: size,
+                            flag,
+                            base_position,
+                            alpha,
+                            flag_ex,
+                            name,
+                            user_data,
+                            pos: ResVec3 {
+                                x: pos_x,
+                                y: pos_y,
+                                z: pos_z,
+                            },
+                            rot_x,
+                            rot_y,
+                            rot_z,
+                            scale_x,
+                            scale_y,
+                            size_x,
+                            size_y,
+                        },
+                        text_buf_bytes,
+                        text_str_bytes: text_string_bytes,
+                        material_idx: material_index,
+                        font_idx: font_index,
+                        text_position,
+                        text_alignment,
+                        text_box_flag,
+                        italic_ratio,
+                        text_str_offset: text_string_offset,
+                        text_cols: text_colors.map(|[r, g, b, a]| ResColor { r, g, b, a }),
+                        font_size: ResVec2::new(font_size[0], font_size[1]),
+                        char_space,
+                        line_space,
+                        text_id_offset,
+                        shadow_offset: ResVec2::new(shadow_offset[0], shadow_offset[1]),
+                        shadow_scale: ResVec2::new(shadow_scale[0], shadow_scale[1]),
+                        shadow_cols: shadow_colors.map(|[r, g, b, a]| ResColor { r, g, b, a }),
+                        shadow_italic_ratio,
+                        line_width_offset_offset,
+                        per_character_transform_offset,
+                    };
+
+                    println!("{res_text_box:#?}");
                 }
                 _ => (),
             }
