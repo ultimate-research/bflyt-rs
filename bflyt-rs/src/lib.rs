@@ -1,5 +1,7 @@
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
-use nnsdk::ui2d::{ResColor, ResPane, ResPicture as ResPictureBase, ResTextBox, ResVec2, ResVec3};
+use nnsdk::ui2d::{
+    ResColor, ResPane, ResPicture as ResPictureBase, ResTextBox as ResTextBoxBase, ResVec2, ResVec3,
+};
 use std::{
     fs::File,
     io::{BufRead, Cursor, Read, Seek},
@@ -19,6 +21,34 @@ pub struct BflytHeader {
 pub struct ResPicture {
     pub picture: ResPictureBase,
     pub tex_coords: Vec<Vec<ResVec2>>,
+}
+
+#[derive(Debug)]
+pub struct ResAnimationInfo {
+    pub count: u8,
+    pub padding: [u8; 3],
+}
+
+#[derive(Debug)]
+pub struct ResPerCharacterTransform {
+    pub eval_time_offset: f32,
+    pub eval_time_width: f32,
+    pub has_animation_info: u8,
+    pub loop_type: u8,
+    pub origin_v: u8,
+    pub padding: [u8; 1],
+}
+
+#[derive(Debug)]
+pub struct ResTextBox {
+    pub text_box: ResTextBoxBase,
+    pub text: String,
+    pub text_id: char,
+    pub line_width_offset_count: u8,
+    pub line_offset: f32,
+    pub line_width: f32,
+    pub res_per_character_transform: ResPerCharacterTransform,
+    pub per_character_transform_anim_info: ResAnimationInfo,
 }
 
 pub struct BflytFile {
@@ -179,9 +209,6 @@ impl BflytFile {
                             let mut tex_coord = [0f32; 2];
                             data.read_f32_into::<LittleEndian>(&mut tex_coord)?;
 
-                            // let mut offsets = vec![0i32; tex_count as usize];
-                            // data.read_i32_into::<LittleEndian>(offsets.as_mut_slice())?;
-
                             texture_coords[i].push(ResVec2::new(tex_coord[0], tex_coord[1]));
                         }
                     }
@@ -287,50 +314,85 @@ impl BflytFile {
                     let shadow_italic_ratio = data.read_f32::<LittleEndian>()?;
                     let line_width_offset_offset = data.read_u32::<LittleEndian>()?;
                     let per_character_transform_offset = data.read_u32::<LittleEndian>()?;
+                    // TODO
+                    let mut text = "asd".to_string();
+                    // TODO
+                    let text_id = 'a';
+                    let line_width_offset_count = data.read_u8()?;
+                    let line_offset = data.read_f32::<LittleEndian>()?;
+                    let line_width = data.read_f32::<LittleEndian>()?;
+
+                    let mut padding_anim_info = [0u8; 3];
+                    data.read_exact(&mut padding_anim_info)?;
+                    let mut padding_transform_anim_info = [0u8; 1];
+                    data.read_exact(&mut padding_transform_anim_info)?;
+
+                    let mut per_character_transform_anim_info = ResAnimationInfo {
+                        count: data.read_u8()?,
+                        padding: padding_anim_info,
+                    };
+
+                    let res_per_character_transform = ResPerCharacterTransform {
+                        eval_time_width: data.read_f32::<LittleEndian>()?,
+                        eval_time_offset: data.read_f32::<LittleEndian>()?,
+                        has_animation_info: data.read_u8()?,
+                        loop_type: data.read_u8()?,
+                        origin_v: data.read_u8()?,
+                        padding: padding_transform_anim_info,
+                    };
 
                     let res_text_box = ResTextBox {
-                        pane: ResPane {
-                            block_header_kind: kind,
-                            block_header_size: size,
-                            flag,
-                            base_position,
-                            alpha,
-                            flag_ex,
-                            name,
-                            user_data,
-                            pos: ResVec3 {
-                                x: pos_x,
-                                y: pos_y,
-                                z: pos_z,
+                        text_box: ResTextBoxBase {
+                            pane: ResPane {
+                                block_header_kind: kind,
+                                block_header_size: size,
+                                flag,
+                                base_position,
+                                alpha,
+                                flag_ex,
+                                name,
+                                user_data,
+                                pos: ResVec3 {
+                                    x: pos_x,
+                                    y: pos_y,
+                                    z: pos_z,
+                                },
+                                rot_x,
+                                rot_y,
+                                rot_z,
+                                scale_x,
+                                scale_y,
+                                size_x,
+                                size_y,
                             },
-                            rot_x,
-                            rot_y,
-                            rot_z,
-                            scale_x,
-                            scale_y,
-                            size_x,
-                            size_y,
+                            text_buf_bytes,
+                            text_str_bytes: text_string_bytes,
+                            material_idx: material_index,
+                            font_idx: font_index,
+                            text_position,
+                            text_alignment,
+                            text_box_flag,
+                            italic_ratio,
+                            text_str_offset: text_string_offset,
+                            text_cols: text_colors.map(|[r, g, b, a]| ResColor { r, g, b, a }),
+                            font_size: ResVec2::new(font_size[0], font_size[1]),
+                            char_space,
+                            line_space,
+                            text_id_offset,
+                            shadow_offset: ResVec2::new(shadow_offset[0], shadow_offset[1]),
+                            shadow_scale: ResVec2::new(shadow_scale[0], shadow_scale[1]),
+                            shadow_cols: shadow_colors.map(|[r, g, b, a]| ResColor { r, g, b, a }),
+                            shadow_italic_ratio,
+                            line_width_offset_offset,
+                            per_character_transform_offset,
                         },
-                        text_buf_bytes,
-                        text_str_bytes: text_string_bytes,
-                        material_idx: material_index,
-                        font_idx: font_index,
-                        text_position,
-                        text_alignment,
-                        text_box_flag,
-                        italic_ratio,
-                        text_str_offset: text_string_offset,
-                        text_cols: text_colors.map(|[r, g, b, a]| ResColor { r, g, b, a }),
-                        font_size: ResVec2::new(font_size[0], font_size[1]),
-                        char_space,
-                        line_space,
-                        text_id_offset,
-                        shadow_offset: ResVec2::new(shadow_offset[0], shadow_offset[1]),
-                        shadow_scale: ResVec2::new(shadow_scale[0], shadow_scale[1]),
-                        shadow_cols: shadow_colors.map(|[r, g, b, a]| ResColor { r, g, b, a }),
-                        shadow_italic_ratio,
-                        line_width_offset_offset,
-                        per_character_transform_offset,
+                        text,
+                        text_id,
+                        line_width_offset_count,
+                        line_offset,
+                        line_width,
+                        per_character_transform_anim_info,
+                        res_per_character_transform,
                     };
 
                     println!("{res_text_box:#?}");
