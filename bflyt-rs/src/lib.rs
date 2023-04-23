@@ -2,7 +2,7 @@ use binrw::io::{Cursor, SeekFrom};
 use binrw::{binread, BinRead, BinReaderExt};
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
 use nnsdk::ui2d::{
-    ResColor, ResPane, ResPicture as ResPictureBase, ResTextBox as ResTextBoxBase, ResVec2, ResVec3,
+    ResColor, ResPane, ResPicture as ResPictureBase, ResTextBox as ResTextBoxBase, ResVec3,
 };
 use std::{
     fs::File,
@@ -10,74 +10,153 @@ use std::{
 };
 
 #[binread]
-#[br(magic = b"FLYT")]
 #[derive(Debug)]
-pub struct BflytHeader {
-    signature: [u8; 4],
-    byte_order: u16,
-    header_size: u16,
-    version: u32,
-    file_size: u32,
-    #[br(pad_after = 8)]
-    section_count: u16,
+pub struct ResVec2 {
+    pub x: f32,
+    pub y: f32,
 }
 
 #[derive(Debug)]
-pub struct ResPicture {
-    pub picture: ResPictureBase,
-    pub tex_coords: Vec<Vec<ResVec2>>,
-}
-
-#[derive(Debug)]
-pub struct ResAnimationInfo {
-    pub count: u8,
-    pub padding: [u8; 3],
-}
-
-#[derive(Debug)]
-pub struct ResPerCharacterTransform {
-    pub eval_time_offset: f32,
-    pub eval_time_width: f32,
-    pub has_animation_info: u8,
-    pub loop_type: u8,
-    pub origin_v: u8,
-    pub padding: [u8; 1],
-}
-
-#[derive(Debug)]
-pub struct ResTextBox {
-    pub text_box: ResTextBoxBase,
-    pub text: String,
-}
-
-#[derive(BinRead, Debug)]
-enum BflytSection {
-    #[br(magic = b"pan1")]
-    Pane,
-
-    #[br(magic = b"txl1")]
-    TextureList,
-
-    #[br(magic = b"pic1")]
-    Picture,
-
-    #[br(magic = b"txt1")]
-    TextBox,
-
-    Uknown {
-        pane_type: u32,
-        size: u32,
-        #[br(seek_before = SeekFrom::Current(-8), count = size)]
-        data: Vec<u8>,
-    },
-}
-
-#[derive(BinRead, Debug)]
-#[br(little)]
+#[binread]
+#[br(little, magic = b"FLYT")]
 pub struct BflytFile {
     header: BflytHeader,
     #[br(count = header.section_count)]
     sections: Vec<BflytSection>,
+}
+
+#[binread]
+#[derive(Debug)]
+pub struct BflytHeader {
+    pub byte_order: u16,
+    pub header_size: u16,
+    pub version: u32,
+    pub file_size: u32,
+    pub section_count: u16,
+    pub padding: u16,
+}
+
+#[derive(Debug)]
+#[binread]
+enum BflytSection {
+    #[br(magic = b"txl1")]
+    TextureList {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"pan1")]
+    Pane {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"pic1")]
+    Picture {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"txt1")]
+    TextBox {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"prt1")]
+    Part {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"mat1")]
+    Material {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"wnd1")]
+    Window {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"pas1")]
+    PaneStart {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"pae1")]
+    PaneEnd {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"grp1")]
+    Group {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"grs1")]
+    GroupStart {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"gre1")]
+    GroupEnd {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"bnd1")]
+    Bounding {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"lyt1")]
+    Layout {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"fnl1")]
+    FontList {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = b"usd1")]
+    UserDataList {
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
+
+    Uknown {
+        pane_type: [u8; 4],
+        size: u32,
+        #[br(count = size as usize - 8)]
+        data: Vec<u8>,
+    },
 }
 
 impl BflytFile {
@@ -90,8 +169,95 @@ impl BflytFile {
 
         let bflyt = BflytFile::read(&mut reader).unwrap();
 
-        println!("{bflyt:#?}");
-        // println!("{signature:x}, {byte_order:x}, {header_size:x}, {version:x}, {file_size:x}, {section_count:x}, {padding:x}");
+        println!(
+            "byte_order: {:x}, header_size: {:x}, version: {:x}, file_size: {:x}, section_count: {:x}",
+            bflyt.header.byte_order,
+            bflyt.header.header_size,
+            bflyt.header.version,
+            bflyt.header.file_size,
+            bflyt.header.section_count
+        );
+
+        // println!("{bflyt:#?}");
+
+        for section in bflyt.sections {
+            match section {
+                BflytSection::TextureList { size, data } => println!("{:#?}", size),
+
+                BflytSection::Pane { size, data } => println!("{:#?}", size),
+
+                BflytSection::Picture { size, data } => println!("{:#?}", size),
+
+                BflytSection::TextBox { size, data } => println!("{:#?}", size),
+
+                BflytSection::Material { size, data } => println!("{:#?}", size),
+
+                BflytSection::Window { size, data } => println!("{:#?}", size),
+
+                BflytSection::Part { size, data } => println!("{:#?}", size),
+
+                BflytSection::PaneStart { size, data } => println!("{:#?}", size),
+
+                BflytSection::PaneEnd { size, data } => println!("{:#?}", size),
+
+                BflytSection::Group { size, data } => println!("{:#?}", size),
+
+                BflytSection::GroupStart { size, data } => println!("{:#?}", size),
+
+                BflytSection::GroupEnd { size, data } => println!("{:#?}", size),
+
+                BflytSection::Bounding { size, data } => println!("{:#?}", size),
+
+                BflytSection::Layout { size, data } => println!("{:#?}", size),
+
+                BflytSection::FontList { size, data } => println!("{:#?}", size),
+
+                BflytSection::UserDataList { size, data } => println!("{:#?}", size),
+
+                BflytSection::Uknown {
+                    pane_type,
+                    size,
+                    data,
+                } => println!("{:#?}", String::from_utf8(pane_type.to_vec()).unwrap()),
+            }
+        }
+
+        // let mut file_2 = File::open(filename)?;
+
+        // let mut magic = [0u8; 4];
+        // file_2.read_exact(&mut magic)?;
+        // if magic != "FLYT".as_bytes() {
+        //     return Err(Box::new(std::io::Error::new(
+        //         std::io::ErrorKind::InvalidData,
+        //         "Invalid magic number",
+        //     )));
+        // }
+
+        // let signature = u32::from_le_bytes(magic);
+        // let byte_order = file_2.read_u16::<LittleEndian>()?;
+        // if byte_order == 0xFFE {
+        //     panic!("BigEndian detected in file, not supported");
+        // }
+
+        // let header_size = file_2.read_u16::<LittleEndian>()?;
+        // let version = file_2.read_u32::<LittleEndian>()?;
+        // let file_size = file_2.read_u32::<LittleEndian>()?;
+        // let section_count = file_2.read_u16::<LittleEndian>()?;
+        // let _padding = file_2.read_u16::<LittleEndian>()?;
+
+        // let bflyt_2 = BflytFile {
+        //     header: BflytHeader {
+        //         byte_order,
+        //         header_size,
+        //         version,
+        //         file_size,
+        //         section_count,
+        //     },
+        // };
+        // println!(
+        //     "{:x}, {:x}, {:x}, {:x}, {:x}",
+        //     byte_order, header_size, version, file_size, section_count
+        // );
 
         // for _ in 0..section_count {
         //     let mut kind_bytes = [0u8; 4];
