@@ -4,7 +4,7 @@ use nnsdk::ui2d::{
 };
 use std::{
     fs::File,
-    io::{BufRead, Cursor, Read, Seek},
+    io::{BufRead, Cursor, Read, Seek, SeekFrom},
 };
 
 pub struct BflytHeader {
@@ -43,12 +43,12 @@ pub struct ResPerCharacterTransform {
 pub struct ResTextBox {
     pub text_box: ResTextBoxBase,
     pub text: String,
-    pub text_id: char,
-    pub line_width_offset_count: u8,
-    pub line_offset: f32,
-    pub line_width: f32,
-    pub res_per_character_transform: ResPerCharacterTransform,
-    pub per_character_transform_anim_info: ResAnimationInfo,
+    // pub text_id: [u8; 2],
+    // pub line_width_offset_count: u8,
+    // pub line_offset: f32,
+    // pub line_width: f32,
+    // pub res_per_character_transform: ResPerCharacterTransform,
+    // pub per_character_transform_anim_info: ResAnimationInfo,
 }
 
 pub struct BflytFile {
@@ -106,7 +106,7 @@ impl BflytFile {
                     // data.read_exact(&mut offsets);
                     data.read_i32_into::<LittleEndian>(offsets.as_mut_slice())?;
                     for offset in offsets {
-                        data.seek(std::io::SeekFrom::Start(base_offset + offset as u64))?;
+                        data.seek(SeekFrom::Start(base_offset + offset as u64))?;
                         let mut bytes = Vec::new();
                         data.read_until(b'\0', &mut bytes)?;
 
@@ -129,6 +129,11 @@ impl BflytFile {
                     data.read_exact(&mut name)?;
                     let mut user_data = [0u8; 8];
                     data.read_exact(&mut user_data)?;
+
+                    println!(
+                        "Pane Name: {:#?}",
+                        String::from_utf8(name.to_vec()).unwrap()
+                    );
 
                     let pos_x = data.read_f32::<LittleEndian>()?;
                     let pos_y = data.read_f32::<LittleEndian>()?;
@@ -180,6 +185,11 @@ impl BflytFile {
                     data.read_exact(&mut name)?;
                     let mut user_data = [0u8; 8];
                     data.read_exact(&mut user_data)?;
+
+                    println!(
+                        "Pane Name: {:#?}",
+                        String::from_utf8(name.to_vec()).unwrap()
+                    );
 
                     let pos_x = data.read_f32::<LittleEndian>()?;
                     let pos_y = data.read_f32::<LittleEndian>()?;
@@ -258,6 +268,7 @@ impl BflytFile {
                         "Length: {size}; Expecting {}",
                         std::mem::size_of::<ResTextBox>()
                     );
+
                     let flag = data.read_u8()?;
                     let base_position = data.read_u8()?;
                     let alpha = data.read_u8()?;
@@ -266,6 +277,11 @@ impl BflytFile {
                     data.read_exact(&mut name)?;
                     let mut user_data = [0u8; 8];
                     data.read_exact(&mut user_data)?;
+
+                    println!(
+                        "Pane Name: {:#?}",
+                        String::from_utf8(name.to_vec()).unwrap()
+                    );
 
                     let pos_x = data.read_f32::<LittleEndian>()?;
                     let pos_y = data.read_f32::<LittleEndian>()?;
@@ -278,8 +294,9 @@ impl BflytFile {
                     let size_x = data.read_f32::<LittleEndian>()?;
                     let size_y = data.read_f32::<LittleEndian>()?;
 
-                    let text_buf_bytes = data.read_u16::<LittleEndian>()?;
-                    let text_string_bytes = data.read_u16::<LittleEndian>()?;
+                    // Beginning of TextBox specific fields
+                    let text_length = data.read_u16::<LittleEndian>()?; // text length
+                    let restricted_text_length = data.read_u16::<LittleEndian>()?; // restricted text legnth, whatever that means
                     let material_index = data.read_u16::<LittleEndian>()?;
                     let font_index = data.read_u16::<LittleEndian>()?;
                     let text_position = data.read_u8()?;
@@ -314,32 +331,13 @@ impl BflytFile {
                     let shadow_italic_ratio = data.read_f32::<LittleEndian>()?;
                     let line_width_offset_offset = data.read_u32::<LittleEndian>()?;
                     let per_character_transform_offset = data.read_u32::<LittleEndian>()?;
-                    // TODO
-                    let mut text = "asd".to_string();
-                    // TODO
-                    let text_id = 'a';
-                    let line_width_offset_count = data.read_u8()?;
-                    let line_offset = data.read_f32::<LittleEndian>()?;
-                    let line_width = data.read_f32::<LittleEndian>()?;
 
-                    let mut padding_anim_info = [0u8; 3];
-                    data.read_exact(&mut padding_anim_info)?;
-                    let mut padding_transform_anim_info = [0u8; 1];
-                    data.read_exact(&mut padding_transform_anim_info)?;
+                    data.seek(SeekFrom::Start(text_string_offset as u64 - 8));
+                    let mut text = Vec::<u8>::new();
 
-                    let mut per_character_transform_anim_info = ResAnimationInfo {
-                        count: data.read_u8()?,
-                        padding: padding_anim_info,
-                    };
-
-                    let res_per_character_transform = ResPerCharacterTransform {
-                        eval_time_width: data.read_f32::<LittleEndian>()?,
-                        eval_time_offset: data.read_f32::<LittleEndian>()?,
-                        has_animation_info: data.read_u8()?,
-                        loop_type: data.read_u8()?,
-                        origin_v: data.read_u8()?,
-                        padding: padding_transform_anim_info,
-                    };
+                    for i in 0..text_length {
+                        text.push(data.read_u8()?);
+                    }
 
                     let res_text_box = ResTextBox {
                         text_box: ResTextBoxBase {
@@ -365,8 +363,8 @@ impl BflytFile {
                                 size_x,
                                 size_y,
                             },
-                            text_buf_bytes,
-                            text_str_bytes: text_string_bytes,
+                            text_buf_bytes: text_length,
+                            text_str_bytes: restricted_text_length,
                             material_idx: material_index,
                             font_idx: font_index,
                             text_position,
@@ -386,16 +384,14 @@ impl BflytFile {
                             line_width_offset_offset,
                             per_character_transform_offset,
                         },
-                        text,
-                        text_id,
-                        line_width_offset_count,
-                        line_offset,
-                        line_width,
-                        per_character_transform_anim_info,
-                        res_per_character_transform,
+                        text: String::from_utf8(text)?,
                     };
 
                     println!("{res_text_box:#?}");
+                    // panic!(
+                    //     "text: {}\n{res_text_box:#?}",
+                    //     String::from_utf8(res_text_box.text_box.pane.name.to_vec()).unwrap()
+                    // );
                 }
                 _ => (),
             }
