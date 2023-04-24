@@ -1,4 +1,5 @@
 use binrw::io::{Cursor, SeekFrom, TakeSeekExt};
+use binrw::meta::{EndianKind, ReadEndian};
 use binrw::{binread, BinRead, BinReaderExt, BinResult, NullString, Endian};
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
 use nnsdk::ui2d::{
@@ -112,23 +113,149 @@ pub struct ResPictureTest {
 
 #[derive(BinRead, Debug, Default)]
 pub struct ResAnimationInfo {
+    pub kind: u32,
     pub count: u8,
     pub padding: [u8; 3],
+}
+
+impl ReadEndian for ResAnimationInfo {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 #[derive(BinRead, Debug)]
 pub struct ResPerCharacterTransform {
     pub eval_time_offset: f32,
     pub eval_time_width: f32,
-    pub has_animation_info: u8,
     pub loop_type: u8,
     pub origin_v: u8,
+    pub has_animation_info: u8,
     pub padding: [u8; 1],
+}
+
+impl ReadEndian for ResPerCharacterTransform {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 #[derive(BinRead, Debug)]
 pub struct ResTextBoxTest {
     pub pane: ResPaneTest,
+    #[br(parse_with = additional_info_parser)]
+    pub additional_info: TextBoxAdditionalInfo
+}
+
+fn additional_info_parser<R: Read + Seek>(data: &mut R, _: Endian, _: ()) -> BinResult<TextBoxAdditionalInfo> {
+    let base_offset = data.stream_position()? - std::mem::size_of::<ResPaneTest>() as u64;
+    let text_length = data.read_u16::<LittleEndian>()?; // text length
+    let restricted_text_length = data.read_u16::<LittleEndian>()?; // restricted text legnth, whatever that means
+    let material_index = data.read_u16::<LittleEndian>()?;
+    let font_index = data.read_u16::<LittleEndian>()?;
+    let text_position = data.read_u8()?;
+    let text_alignment = data.read_u8()?;
+    let text_box_flag = data.read_u16::<LittleEndian>()?;
+    let italic_ratio = data.read_f32::<LittleEndian>()?;
+    let text_string_offset = data.read_u32::<LittleEndian>()?;
+
+    let mut text_colors = [[0u8; 4]; 2];
+    for i in 0..text_colors.len() {
+        data.read_exact(&mut text_colors[i])?;
+    }
+
+    let mut font_size = [0f32; 2];
+    data.read_f32_into::<LittleEndian>(&mut font_size)?;
+
+    let char_space = data.read_f32::<LittleEndian>()?;
+    let line_space = data.read_f32::<LittleEndian>()?;
+    let text_id_offset = data.read_u32::<LittleEndian>()?;
+
+    let mut shadow_offset = [0f32; 2];
+    data.read_f32_into::<LittleEndian>(&mut shadow_offset)?;
+
+    let mut shadow_scale = [0f32; 2];
+    data.read_f32_into::<LittleEndian>(&mut shadow_scale)?;
+
+    let mut shadow_colors = [[0u8; 4]; 2];
+    for i in 0..shadow_colors.len() {
+        data.read_exact(&mut shadow_colors[i])?;
+    }
+
+    let shadow_italic_ratio = data.read_f32::<LittleEndian>()?;
+    let line_width_offset_offset = data.read_u32::<LittleEndian>()?;
+    let per_character_transform_offset = data.read_u32::<LittleEndian>()?;
+
+    data.seek(SeekFrom::Start(base_offset + text_string_offset as u64 - 8))?;
+    let mut text = Vec::<u8>::new();
+
+    for i in 0..text_length {
+        text.push(data.read_u8()?);
+    }
+
+    data.seek(SeekFrom::Start(base_offset + text_id_offset as u64 - 8))?;
+    let text_id = NullString::read(data)?;
+
+    let (line_width_offset_count, line_offset, line_width) = if line_width_offset_offset != 0 {
+        data.seek(SeekFrom::Start(base_offset + line_width_offset_offset as u64 - 8))?; 
+        let line_width_offset_count = data.read_u8()?;
+        
+        let mut line_offset = Vec::new();
+        for i in 0..line_width_offset_count {
+            line_offset.push(data.read_f32::<LittleEndian>()?);
+        }
+
+        let mut line_width = Vec::new();
+        for i in 0..line_width_offset_count {
+            line_width.push(data.read_f32::<LittleEndian>()?);
+        }
+
+        (line_width_offset_count, line_offset, line_width)
+    } else {
+        (0, vec![], vec![])
+    };
+
+    let (per_character_transform, per_character_transform_animation_info) = if per_character_transform_offset != 0 {
+        data.seek(SeekFrom::Start(base_offset + per_character_transform_offset as u64 - 8))?;
+        let res_per_character_transform = ResPerCharacterTransform::read(data)?;
+        let res_per_character_transform_animation_info = ResAnimationInfo::read(data)?;
+        (Some(res_per_character_transform), Some(res_per_character_transform_animation_info))
+    } else {
+        (None, None)
+    };
+
+    let res_text_box = TextBoxAdditionalInfo {
+        text_buf_bytes: text_length,
+        text_str_bytes: restricted_text_length,
+        material_idx: material_index,
+        font_idx: font_index,
+        text_position,
+        text_alignment,
+        text_box_flag,
+        italic_ratio,
+        text_str_offset: text_string_offset,
+        text_cols: text_colors.map(|[r, g, b, a]| ResColorTest { r, g, b, a }),
+        font_size: ResVec2Test { x: font_size[0], y: font_size[1] },
+        char_space,
+        line_space,
+        text_id_offset,
+        shadow_offset: ResVec2Test { x: shadow_offset[0], y: shadow_offset[1] },
+        shadow_scale: ResVec2Test { x: shadow_scale[0], y: shadow_scale[1] },
+        shadow_cols: shadow_colors.map(|[r, g, b, a]| ResColorTest { r, g, b, a }),
+        shadow_italic_ratio,
+        line_width_offset_offset,
+        per_character_transform_offset,
+        text,
+        text_id,
+        line_width_offset_count,
+        line_offset,
+        line_width,
+        per_character_transform,
+        per_character_transform_animation_info
+    };
+
+    Ok(res_text_box)
+}
+
+#[repr(C)]
+#[derive(BinRead, Debug)]
+pub struct TextBoxAdditionalInfo {
     pub text_buf_bytes: u16,
     pub text_str_bytes: u16,
     pub material_idx: u16,
@@ -150,9 +277,9 @@ pub struct ResTextBoxTest {
     pub line_width_offset_offset: u32,
     pub per_character_transform_offset: u32,
     #[br(seek_before = SeekFrom::Start(text_str_offset as u64 - 8), count = text_buf_bytes + 1)]
-    pub text: Vec<u16>,
-    #[br(if(text_id_offset > 0), seek_before = SeekFrom::Start(text_id_offset as u64 - 8), count = text_str_bytes + 1)]
-    pub text_id: Vec<u8>,
+    pub text: Vec<u8>,
+    #[br(if(text_id_offset > 0), seek_before = SeekFrom::Start(text_id_offset as u64 - 8))]
+    pub text_id: NullString,
     #[br(if(line_width_offset_offset > 0))]
     pub line_width_offset_count: u8,
     #[br(if(line_width_offset_offset > 0), seek_before = SeekFrom::Start(line_width_offset_offset as u64 - 8), count = line_width_offset_count)]
@@ -163,16 +290,8 @@ pub struct ResTextBoxTest {
     pub per_character_transform: Option<ResPerCharacterTransform>,
     #[br(if(per_character_transform_offset > 0))]
     pub per_character_transform_animation_info: Option<ResAnimationInfo>,
-    /* Additional Info
-        uint16_t           text[];                     // Text.
-        char                textId[];                   // The text ID.
-        u8 lineWidthOffsetCount; // The quantity of widths and offsets for each line.
-        float lineOffset[]; // The offset for each line.
-        float lineWidth[]; // The width of each line.
-        ResPerCharacterTransform perCharacterTransform     // Information for per-character animation.
-        ResAnimationInfo       perCharacterTransformAnimationInfo;     // Animation information for per-character animation.
-    */
 }
+
 
 #[derive(BinRead, Debug)]
 enum BflytSection {
@@ -198,10 +317,8 @@ enum BflytSection {
     #[br(magic = b"txt1")]
     TextBox {
         size: u32,
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
-        // TODO
-        // text_box: ResTextBoxTest
+        #[br(align_after = 4)]
+        text_box: ResTextBoxTest
     },
 
     #[br(magic = b"prt1")]
@@ -328,12 +445,12 @@ impl BflytFile {
                 // BflytSection::Layout { size, data } => println!("{:#?}", size),
                 // BflytSection::FontList { size, data } => println!("{:#?}", size),
                 // BflytSection::UserDataList { size, data } => println!("{:#?}", size),
-                _ => (),
                 BflytSection::Unknown {
                     pane_type,
                     size,
                     data,
                 } => println!("{:#?}", String::from_utf8(pane_type.to_vec()).unwrap()),
+                _ => (),
             }
         }
 
