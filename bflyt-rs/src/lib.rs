@@ -55,13 +55,14 @@ pub struct ResVec3Test {
 }
 
 #[repr(C)]
-#[derive(BinRead, Debug, Copy, Clone)]
+#[derive(BinRead, Debug, Clone)]
 pub struct ResPaneTest {
     pub flag: u8,
     pub base_position: u8,
     pub alpha: u8,
     pub flag_ex: u8,
-    pub name: [u8; 24],
+    #[br(align_after = 24, assert(name.len() == 24))]
+    pub name: NullString,
     pub user_data: [u8; 8],
     pub pos: ResVec3Test,
     pub rot_x: f32,
@@ -183,7 +184,8 @@ pub struct ResTextBoxTest {
 #[repr(C)]
 #[derive(BinRead, Debug)]
 pub struct ResPartsProperty {
-    pub name: [u8; 24],
+    #[br(align_after = 24, assert(name.len() == 24))]
+    pub name: NullString,
     pub usage_flag: u8,
     pub basic_usage_flag: u8,
     pub material_usage_flag: u8,
@@ -200,9 +202,9 @@ pub struct ResPartsTest {
     pub property_count: u32,
     pub magnify: ResVec2Test,
     #[br(count = property_count)]
-    pub sections: Vec<ResPartsTest>,
-    #[br(dbg)]
-    pub part_name: [u8; 24]
+    pub sections: Vec<ResPartsProperty>,
+    #[br(align_after = 4)]
+    pub part_name: NullString
 }
 
 #[derive(BinRead, Debug)]
@@ -346,7 +348,7 @@ impl BflytFile {
                 // BflytSection::TextBox { .. } => println!("{section:#?}"),
                 // BflytSection::Material { size, data } => println!("{:#?}", size),
                 // BflytSection::Window { size, data } => println!("{:#?}", size),
-                BflytSection::Part { size, part } => println!("{size}\n{:#?}", part),
+                // BflytSection::Part { size, part } => println!("{size}\n{:#?}", part),
                 // BflytSection::PaneStart { size, data } => println!("{:#?}", size),
                 // BflytSection::PaneEnd { size, data } => println!("{:#?}", size),
                 // BflytSection::Group { size, data } => println!("{:#?}", size),
