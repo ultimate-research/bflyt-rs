@@ -3,7 +3,7 @@ use binrw::meta::{EndianKind, ReadEndian};
 use binrw::{binread, BinRead, BinReaderExt, BinResult, NullString, Endian};
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
 use nnsdk::ui2d::{
-    ResColor, ResPane, ResPicture as ResPictureBase, ResTextBox as ResTextBoxBase, ResVec2, ResVec3,
+    ResColor, ResPane, ResPicture as ResPictureBase, ResTextBox as ResTextBoxBase, ResVec2, ResVec3
 };
 use std::{
     fs::File,
@@ -180,6 +180,31 @@ pub struct ResTextBoxTest {
     pub per_character_transform_animation_info: Option<ResAnimationInfo>,
 }
 
+#[repr(C)]
+#[derive(BinRead, Debug)]
+pub struct ResPartsProperty {
+    pub name: [u8; 24],
+    pub usage_flag: u8,
+    pub basic_usage_flag: u8,
+    pub material_usage_flag: u8,
+    pub system_ext_user_data_override_flag: u8,
+    pub property_offset: u32,
+    pub ext_user_data_offset: u32,
+    pub pane_basic_info_offset: u32,
+}
+
+#[repr(C)]
+#[derive(BinRead, Debug)]
+pub struct ResPartsTest {
+    pub pane: ResPaneTest,
+    pub property_count: u32,
+    pub magnify: ResVec2Test,
+    #[br(count = property_count)]
+    pub sections: Vec<ResPartsTest>,
+    #[br(dbg)]
+    pub part_name: [u8; 24]
+}
+
 #[derive(BinRead, Debug)]
 enum BflytSection {
     #[br(magic = b"pan1")]
@@ -211,8 +236,7 @@ enum BflytSection {
     #[br(magic = b"prt1")]
     Part {
         size: u32,
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        part: ResPartsTest,
     },
 
     #[br(magic = b"mat1")]
@@ -322,7 +346,7 @@ impl BflytFile {
                 // BflytSection::TextBox { .. } => println!("{section:#?}"),
                 // BflytSection::Material { size, data } => println!("{:#?}", size),
                 // BflytSection::Window { size, data } => println!("{:#?}", size),
-                // BflytSection::Part { size, data } => println!("{:#?}", size),
+                BflytSection::Part { size, part } => println!("{size}\n{:#?}", part),
                 // BflytSection::PaneStart { size, data } => println!("{:#?}", size),
                 // BflytSection::PaneEnd { size, data } => println!("{:#?}", size),
                 // BflytSection::Group { size, data } => println!("{:#?}", size),
