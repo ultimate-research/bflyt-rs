@@ -77,12 +77,20 @@ pub struct ResVec2Test {
     pub y: f32,
 }
 
+impl ReadEndian for ResVec2Test {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
 #[repr(C)]
 #[derive(Serialize, BinRead, Debug, Copy, Clone)]
 pub struct ResVec3Test {
     pub x: f32,
     pub y: f32,
     pub z: f32,
+}
+
+impl ReadEndian for ResVec3Test {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 #[repr(C)]
@@ -103,6 +111,10 @@ pub struct ResPaneTest {
     pub scale_y: f32,
     pub size_x: f32,
     pub size_y: f32,
+}
+
+impl ReadEndian for ResPaneTest {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 fn texture_list_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResult<TextureListInner> {
@@ -226,20 +238,98 @@ pub struct ResPartsProperty {
     pub pane_basic_info_offset: u32,
 }
 
+impl ReadEndian for ResPartsProperty {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
 #[repr(C)]
 #[derive(Serialize, BinRead, Debug)]
 pub struct ResPartsTest {
+    pub size: u32,
     pub pane: ResPaneTest,
     pub property_count: u32,
     pub magnify: ResVec2Test,
     #[br(count = property_count)]
-    pub sections: Vec<ResPartsProperty>,
-    #[br(align_after = 4)]
-    pub part_name: SerdeNullString
+    pub properties: Vec<ResPartsProperty>,
+    #[br(dbg, align_after = 4)]
+    pub part_name: SerdeNullString,
+    // Not actually
+    #[br(count = property_count)]
+    pub sections: Vec<BflytSection>
+}
+
+#[repr(C)]
+#[derive(Serialize, BinRead, Debug)]
+pub struct ResPartsPaneBasicInfo {
+    pub user_data: [u8; 8],
+    pub translate: ResVec3Test,
+    pub rotate: ResVec3Test,
+    pub scale: ResVec2Test,
+    pub size: ResVec2Test,
+    pub alpha: u8,
+    padding: [u8; 3]
+}
+
+fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResult<ResPartsTest> {
+    let base_offset = reader.stream_position()? - 4;
+
+    let size = reader.read_u32::<LittleEndian>()?;
+    let pane = ResPaneTest::read(reader)?;
+
+    let mut properties: Vec<ResPartsProperty> = Vec::new();
+
+    let property_count = reader.read_u32::<LittleEndian>()?;
+    let magnify = ResVec2Test::read(reader)?;
+
+    for _ in 0..property_count {
+        let property = ResPartsProperty::read(reader)?;
+        properties.push(property);
+    }
+
+    let part_name = SerdeNullString::read(reader)?;
+    let pos = reader.stream_position()?;
+    if pos % 4 != 0 {
+        reader.seek(SeekFrom::Current((4 - (pos % 4)) as i64))?;
+    }
+
+    let mut sections = Vec::new();
+    for property in &properties {
+        if property.property_offset != 0 {
+            reader.seek(SeekFrom::Start(base_offset + property.property_offset as u64))?;
+            let section = BflytSection::read(reader)?;
+            sections.push(section);
+        }
+
+        if property.ext_user_data_offset != 0 {
+            reader.seek(SeekFrom::Start(base_offset + property.ext_user_data_offset as u64))?;
+            let section = BflytSection::read(reader)?;
+            sections.push(section);
+        }
+
+        if property.pane_basic_info_offset != 0 {
+            reader.seek(SeekFrom::Start(base_offset + property.pane_basic_info_offset as u64))?;
+            let section = BflytSection::read(reader)?;
+            sections.push(section);
+        }
+    }
+
+    reader.seek(SeekFrom::Start(base_offset + size as u64))?;
+
+    let parts = ResPartsTest {
+        size,
+        pane,
+        property_count,
+        magnify,
+        properties,
+        part_name,
+        sections
+    };
+
+    Ok(parts)
 }
 
 #[derive(Serialize, BinRead, Debug)]
-enum BflytSection {
+pub enum BflytSection {
     #[br(magic = b"pan1")]
     Pane {
         size: u32,
@@ -268,11 +358,8 @@ enum BflytSection {
 
     #[br(magic = b"prt1")]
     Part {
-        size: u32,
-        // part: ResPartsTest,
-        #[serde(skip_serializing)]
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>
+        #[br(parse_with = res_parts_parser)]
+        part: ResPartsTest,
     },
 
     #[br(magic = b"mat1")]
@@ -362,6 +449,14 @@ enum BflytSection {
         #[br(count = size as usize - 8)]
         data: Vec<u8>,
     },
+
+    PartsBasicInfo {
+        info: ResPartsPaneBasicInfo
+    }
+}
+
+impl ReadEndian for BflytSection {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 impl BflytFile {
