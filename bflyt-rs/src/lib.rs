@@ -380,18 +380,16 @@ pub enum BflytSection {
 
     #[br(magic = b"pas1")]
     PaneStart {
-        size: u32,
+        #[br(assert(size == 8))]
         #[serde(skip_serializing)]
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        size: u32,
     },
 
     #[br(magic = b"pae1")]
     PaneEnd {
-        size: u32,
+        #[br(assert(size == 8))]
         #[serde(skip_serializing)]
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        size: u32,
     },
 
     #[br(magic = b"grp1")]
@@ -404,18 +402,16 @@ pub enum BflytSection {
 
     #[br(magic = b"grs1")]
     GroupStart {
-        size: u32,
+        #[br(assert(size == 8))]
         #[serde(skip_serializing)]
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        size: u32,
     },
 
     #[br(magic = b"gre1")]
     GroupEnd {
-        size: u32,
+        #[br(assert(size == 8))]
         #[serde(skip_serializing)]
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        size: u32,
     },
 
     #[br(magic = b"bnd1")]
