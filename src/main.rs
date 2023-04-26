@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match &args.mode {
         Mode::Unpack { file, .. } => {
             let bflyt = BflytFile::new_from_file(file)?;
-            let output_path = args.out.as_ref().map_or("out.yml", String::as_str);
+            let output_path = args.out.as_ref().map_or("out.json", String::as_str);
             let output = File::create(output_path)?;
             if args.print.is_some() && args.print.unwrap() {
                 println!("{}", serde_json::to_string_pretty(&bflyt)?);
@@ -27,10 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let input_json = std::fs::read_to_string(file)?;
             let bflyt : BflytFile = serde_json::from_str(&input_json)?;
 
-            // Just re-serialize and ensure it's the same
-            let output_json = serde_json::to_string_pretty(&bflyt)?;
-            println!("{output_json}");
-            assert_eq!(input_json, output_json);
+            bflyt.write_to_file(output_path)?;
         }
     }
 

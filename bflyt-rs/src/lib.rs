@@ -1,6 +1,6 @@
 use binrw::io::{Cursor, SeekFrom, TakeSeekExt};
 use binrw::meta::{EndianKind, ReadEndian};
-use binrw::{binread, BinRead, BinResult, NullString, Endian};
+use binrw::{binread, BinRead, BinResult, NullString, Endian, BinWrite, BinWriterExt, binwrite};
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
 use nnsdk::ui2d::{
     ResColor, ResPane, ResPicture as ResPictureBase, ResTextBox as ResTextBoxBase, ResVec2, ResVec3
@@ -13,7 +13,7 @@ use std::{
     io::{Read, Seek},
 };
 
-#[derive(Debug, BinRead, Default, Clone)]
+#[derive(Debug, BinRead, BinWrite, Default, Clone)]
 pub struct SerdeNullString(NullString);
 
 impl Serialize for SerdeNullString {
@@ -103,7 +103,8 @@ impl ReadEndian for SerdeNullString {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[binread]
-#[br(little, magic = b"FLYT")]
+#[binwrite]
+#[brw(little, magic = b"FLYT")]
 pub struct BflytFile {
     header: BflytHeader,
     #[br(count = header.section_count)]
@@ -111,6 +112,7 @@ pub struct BflytFile {
 }
 
 #[binread]
+#[binwrite]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BflytHeader {
     byte_order: u16,
@@ -122,7 +124,7 @@ pub struct BflytHeader {
 }
 
 #[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug, Copy, Clone)]
 pub struct ResColorTest {
     pub r: u8,
     pub g: u8,
@@ -131,7 +133,7 @@ pub struct ResColorTest {
 }
 
 #[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug, Copy, Clone)]
 pub struct ResVec2Test {
     pub x: f32,
     pub y: f32,
@@ -142,7 +144,7 @@ impl ReadEndian for ResVec2Test {
 }
 
 #[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug, Copy, Clone)]
 pub struct ResVec3Test {
     pub x: f32,
     pub y: f32,
@@ -154,7 +156,7 @@ impl ReadEndian for ResVec3Test {
 }
 
 #[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, Debug, Clone)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug, Clone)]
 pub struct ResPaneTest {
     pub flag: u8,
     pub base_position: u8,
@@ -194,7 +196,7 @@ fn texture_list_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinR
 }
 
 #[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, Debug)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct TextureListInner {
     pub tex_count: i32,
     #[br(count = tex_count)]
@@ -204,7 +206,7 @@ pub struct TextureListInner {
 }
 
 #[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, Debug, Clone)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug, Clone)]
 pub struct ResPictureTest {
     pub pane: ResPaneTest,
     pub vtx_cols: [ResColorTest; 4],
@@ -215,7 +217,7 @@ pub struct ResPictureTest {
     pub tex_coords: Vec<[ResVec2Test; 4]>,
 }
 
-#[derive(Serialize, Deserialize, BinRead, Debug, Default)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug, Default)]
 pub struct ResAnimationInfo {
     pub kind: u32,
     pub count: u8,
@@ -226,7 +228,7 @@ impl ReadEndian for ResAnimationInfo {
     const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
-#[derive(Serialize, Deserialize, BinRead, Debug)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResPerCharacterTransform {
     pub eval_time_offset: f32,
     pub eval_time_width: f32,
@@ -240,7 +242,7 @@ impl ReadEndian for ResPerCharacterTransform {
     const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
-#[derive(Serialize, Deserialize, BinRead, Debug)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResTextBoxTest {
     pub pane: ResPaneTest,
     pub text_buf_bytes: u16,
@@ -265,27 +267,37 @@ pub struct ResTextBoxTest {
     pub per_character_transform_offset: u32,
     #[br(count = text_buf_bytes)]
     pub text: Vec<u8>,
+    #[bw(
+        if(*text_id_offset > 0), 
+        // Can't use absolute offsets, so... we know it's after the text string.
+        pad_before = (*text_id_offset as u64 - (*text_str_offset as u64 + *text_buf_bytes as u64))
+    )]
     #[br(
         if(text_id_offset > 0), 
         // Can't use absolute offsets, so... we know it's after the text string.
-        seek_before = SeekFrom::Current((text_id_offset as u64 - (text_str_offset as u64 + text_buf_bytes as u64)) as i64)
+        pad_before = (text_id_offset as u64 - (text_str_offset as u64 + text_buf_bytes as u64))
     )]
     pub text_id: SerdeNullString,
     // Not sure if any of the following work, so if something breaks, check here.
     #[br(if(line_width_offset_offset > 0))]
+    #[bw(if(*line_width_offset_offset > 0))]
     pub line_width_offset_count: u8,
     #[br(if(line_width_offset_offset > 0), count = line_width_offset_count)]
+    #[bw(if(*line_width_offset_offset > 0))]
     pub line_offset: Vec<f32>,
     #[br(if(line_width_offset_offset > 0), count = line_width_offset_count)]
+    #[bw(if(*line_width_offset_offset > 0))]
     pub line_width: Vec<f32>,
     #[br(if(per_character_transform_offset > 0))]
+    #[bw(if(*per_character_transform_offset > 0))]
     pub per_character_transform: Option<ResPerCharacterTransform>,
     #[br(if(per_character_transform_offset > 0))]
+    #[bw(if(*per_character_transform_offset > 0))]
     pub per_character_transform_animation_info: Option<ResAnimationInfo>,
 }
 
 #[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, Debug)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResPartsProperty {
     #[serde(serialize_with = "cstr_serialize", deserialize_with = "cstr_deserialize")]
     pub name: [u8; 24],
@@ -303,7 +315,7 @@ impl ReadEndian for ResPartsProperty {
 }
 
 #[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, Debug)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResPartsTest {
     pub size: u32,
     pub pane: ResPaneTest,
@@ -311,7 +323,7 @@ pub struct ResPartsTest {
     pub magnify: ResVec2Test,
     #[br(count = property_count)]
     pub properties: Vec<ResPartsProperty>,
-    #[br(dbg, align_after = 4)]
+    #[brw(align_after = 4)]
     pub part_name: SerdeNullString,
     // Not actually
     #[br(count = property_count)]
@@ -319,7 +331,7 @@ pub struct ResPartsTest {
 }
 
 #[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, Debug)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResPartsPaneBasicInfo {
     pub user_data: [u8; 8],
     pub translate: ResVec3Test,
@@ -374,7 +386,8 @@ fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResu
     }
 
     let curr_pos = reader.stream_position()?;
-    assert!(curr_pos == base_offset + size as u64, "Failed to parse ResParts. Expected to read {size} bytes, but read {}", curr_pos - base_offset);
+    assert!(curr_pos == base_offset + size as u64, "Failed to parse ResParts with pane name {} and part name {:#?}. Expected to read {size} bytes, but read {}", 
+        unsafe { str_from_u8_nul_utf8_unchecked(&pane.name) }, part_name, curr_pos - base_offset);
 
     let parts = ResPartsTest {
         size,
@@ -389,107 +402,108 @@ fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResu
     Ok(parts)
 }
 
-#[derive(Serialize, Deserialize, BinRead, Debug)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub enum BflytSection {
-    #[br(magic = b"pan1")]
+    #[brw(magic = b"pan1")]
     Pane {
         size: u32,
         pane: ResPaneTest
     },
 
-    #[br(magic = b"txl1")]
+    #[brw(magic = b"txl1")]
     TextureList {
         size: u32,
-        #[br(parse_with = texture_list_parser, align_after = 4)]
+        #[br(parse_with = texture_list_parser)]
+        #[brw(align_after = 4)]
         texture_list: TextureListInner
     },
 
-    #[br(magic = b"pic1")]
+    #[brw(magic = b"pic1")]
     Picture {
         size: u32,
         picture: ResPictureTest
     },
 
-    #[br(magic = b"txt1")]
+    #[brw(magic = b"txt1")]
     TextBox {
         size: u32,
-        #[br(align_after = 4)]
+        #[brw(align_after = 4)]
         text_box: ResTextBoxTest
     },
 
-    #[br(magic = b"prt1")]
+    #[brw(magic = b"prt1")]
     Part {
         #[br(parse_with = res_parts_parser)]
         part: ResPartsTest,
     },
 
-    #[br(magic = b"mat1")]
+    #[brw(magic = b"mat1")]
     Material {
         size: u32,
         #[br(count = size as usize - 8)]
         data: Vec<u8>,
     },
 
-    #[br(magic = b"wnd1")]
+    #[brw(magic = b"wnd1")]
     Window {
         size: u32,
         #[br(count = size as usize - 8)]
         data: Vec<u8>,
     },
 
-    #[br(magic = b"pas1")]
+    #[brw(magic = b"pas1")]
     PaneStart {
         #[br(assert(size == 8))]
         size: u32,
     },
 
-    #[br(magic = b"pae1")]
+    #[brw(magic = b"pae1")]
     PaneEnd {
         #[br(assert(size == 8))]
         size: u32,
     },
 
-    #[br(magic = b"grp1")]
+    #[brw(magic = b"grp1")]
     Group {
         size: u32,
         #[br(count = size as usize - 8)]
         data: Vec<u8>,
     },
 
-    #[br(magic = b"grs1")]
+    #[brw(magic = b"grs1")]
     GroupStart {
         #[br(assert(size == 8))]
         size: u32,
     },
 
-    #[br(magic = b"gre1")]
+    #[brw(magic = b"gre1")]
     GroupEnd {
         #[br(assert(size == 8))]
         size: u32,
     },
 
-    #[br(magic = b"bnd1")]
+    #[brw(magic = b"bnd1")]
     Bounding {
         size: u32,
         #[br(count = size as usize - 8)]
         data: Vec<u8>,
     },
 
-    #[br(magic = b"lyt1")]
+    #[brw(magic = b"lyt1")]
     Layout {
         size: u32,
         #[br(count = size as usize - 8)]
         data: Vec<u8>,
     },
 
-    #[br(magic = b"fnl1")]
+    #[brw(magic = b"fnl1")]
     FontList {
         size: u32,
         #[br(count = size as usize - 8)]
         data: Vec<u8>,
     },
 
-    #[br(magic = b"usd1")]
+    #[brw(magic = b"usd1")]
     UserDataList {
         size: u32,
         #[br(count = size as usize - 8)]
@@ -512,5 +526,12 @@ impl BflytFile {
         println!("Parsed BFLYT!");
 
         Ok(bflyt)
+    }
+
+    pub fn write_to_file(&self, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut file = File::create(filename)?;
+        file.write_le(self)?;
+
+        Ok(())
     }
 }
