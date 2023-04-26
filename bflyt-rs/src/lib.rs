@@ -313,7 +313,8 @@ fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResu
         }
     }
 
-    reader.seek(SeekFrom::Start(base_offset + size as u64))?;
+    let curr_pos = reader.stream_position()?;
+    assert!(curr_pos == base_offset + size as u64, "Failed to parse ResParts. Expected to read {size} bytes, but read {}", curr_pos - base_offset);
 
     let parts = ResPartsTest {
         size,
