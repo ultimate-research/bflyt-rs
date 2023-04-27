@@ -1,0 +1,5 @@
+{
+  "rust-analyzer.linkedProjects": [
+    "./bflyt-rs/Cargo.toml"
+  ]
+}
