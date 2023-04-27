@@ -521,14 +521,6 @@ pub enum BflytSection {
         font_list: FontListInner
     },
 
-    // #[brw(magic = b"txl1")]
-    // TextureList {
-    //     size: u32,
-    //     #[br(parse_with = texture_list_parser)]
-    //     #[brw(align_after = 4)]
-    //     texture_list: TextureListInner
-    // },
-
     #[brw(magic = b"usd1")]
     UserDataList {
         size: u32,
