@@ -206,6 +206,24 @@ pub struct TextureListInner {
 }
 
 #[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResFont {
+    offset: u32
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct FontListInner {
+    #[br(dbg)]
+    pub font_count: u16,
+    padding: u16,
+    #[br(count = font_count, dbg)]
+    pub fonts: Vec<ResFont>,
+    #[br(count = font_count, dbg)]
+    pub font_names: Vec<SerdeNullString>
+}
+
+#[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug, Clone)]
 pub struct ResPictureTest {
     pub pane: ResPaneTest,
@@ -499,9 +517,17 @@ pub enum BflytSection {
     #[brw(magic = b"fnl1")]
     FontList {
         size: u32,
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        #[brw(align_after = 4)]
+        font_list: FontListInner
     },
+
+    // #[brw(magic = b"txl1")]
+    // TextureList {
+    //     size: u32,
+    //     #[br(parse_with = texture_list_parser)]
+    //     #[brw(align_after = 4)]
+    //     texture_list: TextureListInner
+    // },
 
     #[brw(magic = b"usd1")]
     UserDataList {
