@@ -214,12 +214,9 @@ pub struct ResFont {
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct FontListInner {
-    #[br(dbg)]
     pub font_count: u16,
     padding: u16,
-    #[br(count = font_count, dbg)]
     pub fonts: Vec<ResFont>,
-    #[br(count = font_count, dbg)]
     pub font_names: Vec<SerdeNullString>
 }
 
