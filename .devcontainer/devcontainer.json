@@ -28,10 +28,10 @@
 				"rust-lang.rust-analyzer",
 				"serayuzgur.crates",
 				"statiolake.vscode-rustfmt",
-				"bungcip.better-toml"
+				"tamasfe.even-better-toml"
 			]
 		}
-	},
+	}
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
 }
