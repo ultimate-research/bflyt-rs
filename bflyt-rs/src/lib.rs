@@ -216,7 +216,9 @@ pub struct ResFont {
 pub struct FontListInner {
     pub font_count: u16,
     padding: u16,
+    #[br(count = font_count)]
     pub fonts: Vec<ResFont>,
+    #[br(count = font_count)]
     pub font_names: Vec<SerdeNullString>
 }
 
