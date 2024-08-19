@@ -1,13 +1,10 @@
-use binrw::io::{Cursor, SeekFrom, TakeSeekExt};
+use binrw::io::SeekFrom;
 use binrw::meta::{EndianKind, ReadEndian};
 use binrw::{binread, BinRead, BinResult, NullString, Endian, BinWrite, BinWriterExt, binwrite};
+// use binrw::helpers::args_iter;
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
-use nnsdk::ui2d::{
-    ResColor, ResPane, ResPicture as ResPictureBase, ResTextBox as ResTextBoxBase, ResVec2, ResVec3
-};
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use serde::de::{self, Visitor};
-use std::ptr::null;
 use std::{
     fs::File,
     io::{Read, Seek},
@@ -208,7 +205,7 @@ pub struct TextureListInner {
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResFont {
-    offset: u32
+    pub offset: u32
 }
 
 #[repr(C)]
@@ -419,6 +416,264 @@ fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResu
     Ok(parts)
 }
 
+// fn material_list_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResult<MaterialListInner> {
+//     // Get the material count
+//     // Get the start of the block
+//     // Create offsets table
+//     // Create a container to store materials
+//     // Loop through the offsets in table and store them as ResMaterial in container
+//     println!("Running material_list_parser");
+//     let mut materials: Vec<ResMaterial> = Vec::new();
+
+//     // println!("{:?}", materials);
+//     let material_count = reader.read_u16::<LittleEndian>()?;
+//     let _ = reader.read_u16::<LittleEndian>()?;
+//     let base_offset = reader.stream_position()?;
+
+//     // println!("count: {}, base offset: {}", material_count, base_offset);
+//     let mut offsets = vec![0u32; material_count as usize];
+
+//     reader.read_u32_into::<LittleEndian>(offsets.as_mut_slice())?;
+
+//     println!("offsets: {:?}", offsets);
+
+//     for offset in &offsets {
+//         println!("offset: {}", offset);
+//         reader.seek(SeekFrom::Start(base_offset + *offset as u64))?;
+
+//         let size = reader.read_u32::<LittleEndian>().unwrap();
+
+//         println!("size: {:?}", size);
+
+//         let name = SerdeNullString::read(reader)?;
+
+//         let resource_count = ResMaterialResourceCount {
+//             // size: reader.read_u32::<LittleEndian>()?,
+//             tex_map_count: reader.read_u8().unwrap(),
+//             tex_srt_count: reader.read_u8().unwrap(),
+//             tex_coord_gen_count: reader.read_u8().unwrap(),
+//             tev_stage_count: reader.read_u8().unwrap()
+//         };
+
+//         let mat: ResMaterial = ResMaterial { name, resource_count };
+
+//         println!("mat: {:?}", mat);
+//         materials.push(mat);
+//     }
+
+//     Ok(MaterialListInner { material_count, offsets, materials })
+// }
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResMaterialResourceCount {
+    // pub tex_map_count: u8,
+    // pub tex_srt_count: u8,
+    // pub tex_coord_gen_count: u8,
+    // pub tev_stage_count: u8
+    pub bits: u32
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub enum ResMaterialResource {
+    ResTexMap {
+        tex_idx: u16,
+        wrap_s_flt: u8,
+        wrap_t_flt: u8
+    },
+    ResTexTransform {
+        rotate: f32,
+        scale: ResVec2Test,
+        translate: ResVec2Test
+    },
+    ResTexCoordGen {
+        matrix_type: TexGenType,
+        source: TexGenSourceType,
+        test: u16
+    },
+    ResTevStage {
+        combine_rgb: TevMode,
+        combine_alpha: TevMode
+    },
+    ResAlphaCompare {
+        alpha_test: AlphaTest,
+        target: f32
+    },
+    ResBlendMode {
+        src_factor: Factor,
+        dest_factor: Factor,
+        blend_op: BlendOp,
+        logical_op: LogicalOp
+    },
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub enum TexGenType {
+    Matrix2x4(u8)
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub enum TexGenSourceType {
+    Tex0(u8),
+    Tex1(u8),
+    Tex2(u8),
+    OrthoProjection(u8),
+    PaneBaseOrthoProjection(u8),
+    PerspectiveProjection(u8)
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResTexMap {
+    tex_idx: u16,
+    wrap_s_flt: u8,
+    wrap_t_flt: u8
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResTexTransform {
+    rotate: f32,
+    scale: ResVec2Test,
+    translate: ResVec2Test
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResTexCoordGen {
+    matrix_type: TexGenType,
+    source: TexGenSourceType,
+    test: u16
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResAlphaCompare {
+    alpha_test: AlphaTest,
+    target: f32
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResTevStage {
+    combine_rgb: TevMode,
+    combine_alpha: TevMode
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub enum TevMode {
+    Replace(u8),
+    Modulate(u8),
+    Add(u8),
+    AddSigned(u8),
+    Interpolate(u8),
+    Subtract(u8),
+    AddMultiply(u8),
+    MultiplyAdd(u8),
+    Overlay(u8),
+    Lighten(u8),
+    Darken(u8),
+    Indirect(u8),
+    BlendIndirect(u8),
+    EachIndirect(u8)
+}
+        
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub enum AlphaTest {
+    Never(u8),
+    Less(u8),
+    LessEqual(u8),
+    Equal(u8),
+    NotEqual(u8),
+    GreaterEqual(u8),
+    Greater(u8),
+    Always(u8)
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub enum Factor {
+    Zero(u8),
+    One(u8),
+    DestColor(u8),
+    InverseDestColor(u8),
+    SrcAlpha(u8),
+    InverseSrcAlpha(u8),
+    DestAlpha(u8),
+    InverseDestAlpha(u8),
+    SrcColor(u8),
+    InverseSrcColor(u8)
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub enum BlendOp {
+    Disable(u8),
+    Add(u8),
+    Subtract(u8),
+    ReverseSubtract(u8),
+    SelectMin(u8),
+    SelectMax(u8),
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub enum LogicalOp {
+    Disable(u8),
+    NoOp(u8),
+    Clear(u8),
+    Set(u8),
+    Copy(u8),
+    InvCopy(u8),
+    Inv(u8),
+    And(u8),
+    Nand(u8),
+    Or(u8),
+    Nor(u8),
+    Xor(u8),
+    Equiv(u8),
+    RevAnd(u8),
+    InvAnd(u8),
+    RevOr(u8),
+    InvOr(u8),
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResBlendMode {
+    pub src_factor: Factor,
+    pub dest_factor: Factor,
+    pub blend_op: BlendOp,
+    pub logical_op: LogicalOp
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResMaterial {
+    #[br(dbg)]
+    pub name: SerdeNullString,
+    pub mat_black_color: f32,
+    pub mat_white_color: f32,
+    pub resource_count: u32,
+    #[br(count = resource_count & 3)]
+    pub texture_maps: Vec<ResTexMap>,
+    #[br(count = (resource_count >> 2) & 3)]
+    pub texture_transforms: Vec<ResTexTransform>,
+    #[br(count = (resource_count >> 4) & 3)]
+    pub texture_coord_gens: Vec<ResTexCoordGen>,
+    #[br(count = (resource_count >> 6) & 7 )]
+    pub tev_stages: Vec<ResTevStage>,
+    #[br(count = (resource_count >> 9) & 1)]
+    pub alpha_compare: Vec<ResAlphaCompare>,
+    #[br(count = (resource_count >> 10) & 1)]
+    pub blend_mode: Vec<ResBlendMode>
+}
+
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub enum BflytSection {
     #[brw(magic = b"pan1")]
@@ -455,10 +710,13 @@ pub enum BflytSection {
     },
 
     #[brw(magic = b"mat1")]
-    Material {
+    MaterialList {
         size: u32,
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        material_count: u16,
+        #[br(count = material_count - 4, pad_before = 2)]
+        offsets: Vec<u32>,
+        #[br(parse_with = binrw::file_ptr::parse_from_iter(offsets.iter().copied()))]
+        materials: Vec<ResMaterial>
     },
 
     #[brw(magic = b"wnd1")]
@@ -516,7 +774,8 @@ pub enum BflytSection {
     #[brw(magic = b"fnl1")]
     FontList {
         size: u32,
-        #[brw(align_after = 4)]
+        // #[brw(align_after = 4)]
+        #[br(pad_size_to = size as usize - 8)]
         font_list: FontListInner
     },
 
