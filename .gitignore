@@ -1,5 +1,5 @@
 **/target
 **/Cargo.lock
 
-**/info_training.bflyt
-**/out.json
+**/*.bflyt
+**/*out*.json
