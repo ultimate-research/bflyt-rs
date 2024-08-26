@@ -2,6 +2,7 @@ use binrw::io::SeekFrom;
 use binrw::meta::{EndianKind, ReadEndian};
 use binrw::{binread, BinRead, BinResult, NullString, Endian, BinWrite, BinWriterExt, binwrite};
 // use binrw::helpers::args_iter;
+// use binrw::file_ptr::parse_from_iter;
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use serde::de::{self, Visitor};
@@ -114,6 +115,7 @@ pub struct BflytFile {
 pub struct BflytHeader {
     byte_order: u16,
     header_size: u16,
+    #[br(dbg)]
     version: u32,
     file_size: u32,
     section_count: u16,
@@ -416,113 +418,243 @@ fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResu
     Ok(parts)
 }
 
-// fn material_list_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResult<MaterialListInner> {
-//     // Get the material count
-//     // Get the start of the block
-//     // Create offsets table
-//     // Create a container to store materials
-//     // Loop through the offsets in table and store them as ResMaterial in container
-//     println!("Running material_list_parser");
-//     let mut materials: Vec<ResMaterial> = Vec::new();
+#[binrw::parser(reader: reader, endian: _endian)]
+fn material_list_parser() -> BinResult<MaterialListInner> {
+    println!("Running material_list_parser");
+    let base_offset = reader.stream_position()? - 8;
+    // let offset = base_offset;
 
-//     // println!("{:?}", materials);
-//     let material_count = reader.read_u16::<LittleEndian>()?;
-//     let _ = reader.read_u16::<LittleEndian>()?;
-//     let base_offset = reader.stream_position()?;
+    println!("base_offset: {base_offset}");
 
-//     // println!("count: {}, base offset: {}", material_count, base_offset);
-//     let mut offsets = vec![0u32; material_count as usize];
+    let size = reader.read_u32::<LittleEndian>()?;
 
-//     reader.read_u32_into::<LittleEndian>(offsets.as_mut_slice())?;
+    let mut materials: Vec<ResMaterial> = Vec::new();
 
-//     println!("offsets: {:?}", offsets);
+    // println!("{:?}", materials);
+    let material_count = reader.read_u16::<LittleEndian>()?;
+    let _ = reader.seek_relative(2);
 
-//     for offset in &offsets {
-//         println!("offset: {}", offset);
-//         reader.seek(SeekFrom::Start(base_offset + *offset as u64))?;
+    // println!("count: {}, base offset: {}", material_count, base_offset);
+    let mut offsets = vec![0u32; material_count as usize];
 
-//         let size = reader.read_u32::<LittleEndian>().unwrap();
+    reader.read_u32_into::<LittleEndian>(offsets.as_mut_slice())?;
 
-//         println!("size: {:?}", size);
+    println!("offsets: {:?}", offsets);
 
-//         let name = SerdeNullString::read(reader)?;
+    for offset in &offsets {
+        let _ = reader.seek(SeekFrom::Start(base_offset + *offset as u64));
 
-//         let resource_count = ResMaterialResourceCount {
-//             // size: reader.read_u32::<LittleEndian>()?,
-//             tex_map_count: reader.read_u8().unwrap(),
-//             tex_srt_count: reader.read_u8().unwrap(),
-//             tex_coord_gen_count: reader.read_u8().unwrap(),
-//             tev_stage_count: reader.read_u8().unwrap()
-//         };
+        let material_size = reader.read_u32::<LittleEndian>().unwrap();
 
-//         let mat: ResMaterial = ResMaterial { name, resource_count };
+        // let new_reader = reader.read_exact(&mut bytes)?;
+        // println!("size: {:?}", size);
 
-//         println!("mat: {:?}", mat);
-//         materials.push(mat);
-//     }
+        let name = SerdeNullString::read(reader)?;
 
-//     Ok(MaterialListInner { material_count, offsets, materials })
+        let bitflags: i32;
+        let fg_clr: ResColorTest;
+        let bg_clr: ResColorTest;
+
+        // if version >= 0x08000000 {
+            bitflags = reader.read_i32::<LittleEndian>()?;
+            let _ = reader.seek_relative(2);
+            fg_clr = ResColorTest {
+                r: reader.read_u8()?,
+                g: reader.read_u8()?,
+                b: reader.read_u8()?,
+                a: reader.read_u8()?
+            };
+            bg_clr = ResColorTest {
+                r: reader.read_u8()?,
+                g: reader.read_u8()?,
+                b: reader.read_u8()?,
+                a: reader.read_u8()?
+            };
+        // } else {
+        //     // let _ = reader.seek_relative(2);
+        //     fg_clr = ResColorTest {
+        //         r: reader.read_u8()?,
+        //         g: reader.read_u8()?,
+        //         b: reader.read_u8()?,
+        //         a: reader.read_u8()?
+        //     };
+        //     bg_clr = ResColorTest {
+        //         r: reader.read_u8()?,
+        //         g: reader.read_u8()?,
+        //         b: reader.read_u8()?,
+        //         a: reader.read_u8()?
+        //     };
+        //     bitflags = reader.read_i32::<LittleEndian>()?;
+        // }
+        // let resource_count = reader.read_u32::<LittleEndian>()?;
+        
+        let texture_map_count = bitflags & 3;
+        let mut texture_maps: Vec<ResTexMap> = Vec::new();
+
+        let texture_transform_count = (bitflags & 0xC) >> 2;
+        let mut texture_transforms: Vec<ResTexTransform>= Vec::new();
+
+        let tex_coord_gen_count = (bitflags >> 4) & 3;
+        let mut texture_coord_gens: Vec<ResTexCoordGen> = Vec::new();
+
+        let tev_stages_count = (bitflags >> 6) & 7;
+        let mut tev_stages: Vec<ResTevStage> = Vec::new();
+
+        let alpha_compare_count = (bitflags >> 9) & 1;
+        let mut alpha_compares: Vec<ResAlphaCompare> = Vec::new();
+
+        let blend_mode_count = (bitflags >> 10) & 1;
+        let mut blend_modes: Vec<ResBlendMode> = Vec::new();
+        
+        for _ in 0..texture_map_count {
+            texture_maps.push(ResTexMap {
+                tex_idx: reader.read_u16::<LittleEndian>()?,
+                wrap_s_flt: reader.read_u8()?,
+                wrap_t_flt: reader.read_u8()?
+            });
+        }
+
+        for _ in 0..texture_transform_count {
+            texture_transforms.push(ResTexTransform {
+                rotate: reader.read_f32::<LittleEndian>()?,
+                scale: ResVec2Test {
+                    x: reader.read_f32::<LittleEndian>()?,
+                    y: reader.read_f32::<LittleEndian>()?
+                },
+                translate: ResVec2Test {
+                    x: reader.read_f32::<LittleEndian>()?,
+                    y: reader.read_f32::<LittleEndian>()?
+                },
+            });
+        }
+
+        for _ in 0..tex_coord_gen_count {
+            texture_coord_gens.push(ResTexCoordGen {
+                matrix_type: TexGenType::Matrix2x4,
+                source: TexGenSourceType::from_u8(reader.read_u8()?),
+                test: reader.read_u16::<LittleEndian>()?
+            });
+        }
+
+        for _ in 0..tev_stages_count {
+            let combine_rgb: TevMode = TevMode::from_u8(reader.read_u8()?);
+            let combine_alpha: TevMode = TevMode::from_u8(reader.read_u8()?);
+            tev_stages.push(ResTevStage {
+                combine_rgb,
+                combine_alpha
+            });
+        }
+
+        for _ in 0..alpha_compare_count {
+            let alpha_test: AlphaTest = AlphaTest::from_u8(reader.read_u8()?);
+
+            alpha_compares.push(ResAlphaCompare {
+                alpha_test,
+                target: reader.read_f32::<LittleEndian>()?
+            })
+        }
+
+        for _ in 0..blend_mode_count {
+            let src_factor = reader.read_u8()?;
+            let dest_factor = reader.read_u8()?;
+            let blend_op = reader.read_u8()?;
+            let logical_op = reader.read_u8()?;
+
+            blend_modes.push(ResBlendMode {
+                src_factor: Factor::from_u8(src_factor),
+                dest_factor: Factor::from_u8(dest_factor),
+                blend_op: BlendOp::from_u8(blend_op),
+                logical_op: LogicalOp::from_u8(logical_op)
+            })
+        }
+
+        let mat: ResMaterial = ResMaterial {
+            name,
+            bitflags,
+            mat_black_color: fg_clr,
+            mat_white_color: bg_clr,
+            // resource_count,
+            texture_maps,
+            texture_transforms,
+            texture_coord_gens,
+            tev_stages,
+            alpha_compares,
+            blend_modes
+        };
+
+        println!("mat: {:?}", mat);
+        materials.push(mat);
+    }
+
+    Ok(MaterialListInner { size, material_count, offsets, materials })
+}
+
+// #[repr(C)]
+// #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+// pub enum ResMaterialResource {
+//     ResTexMap {
+//         tex_idx: u16,
+//         wrap_s_flt: u8,
+//         wrap_t_flt: u8
+//     },
+//     ResTexTransform {
+//         rotate: f32,
+//         scale: ResVec2Test,
+//         translate: ResVec2Test
+//     },
+//     ResTexCoordGen {
+//         matrix_type: TexGenType,
+//         source: TexGenSourceType,
+//         test: u16
+//     },
+//     ResTevStage {
+//         combine_rgb: TevMode,
+//         combine_alpha: TevMode
+//     },
+//     ResAlphaCompare {
+//         alpha_test: AlphaTest,
+//         target: f32
+//     },
+//     ResBlendMode {
+//         src_factor: Factor,
+//         dest_factor: Factor,
+//         blend_op: BlendOp,
+//         logical_op: LogicalOp
+//     },
 // }
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
-pub struct ResMaterialResourceCount {
-    // pub tex_map_count: u8,
-    // pub tex_srt_count: u8,
-    // pub tex_coord_gen_count: u8,
-    // pub tev_stage_count: u8
-    pub bits: u32
-}
-
-#[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
-pub enum ResMaterialResource {
-    ResTexMap {
-        tex_idx: u16,
-        wrap_s_flt: u8,
-        wrap_t_flt: u8
-    },
-    ResTexTransform {
-        rotate: f32,
-        scale: ResVec2Test,
-        translate: ResVec2Test
-    },
-    ResTexCoordGen {
-        matrix_type: TexGenType,
-        source: TexGenSourceType,
-        test: u16
-    },
-    ResTevStage {
-        combine_rgb: TevMode,
-        combine_alpha: TevMode
-    },
-    ResAlphaCompare {
-        alpha_test: AlphaTest,
-        target: f32
-    },
-    ResBlendMode {
-        src_factor: Factor,
-        dest_factor: Factor,
-        blend_op: BlendOp,
-        logical_op: LogicalOp
-    },
-}
-
-#[repr(C)]
-#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
 pub enum TexGenType {
-    Matrix2x4(u8)
+    Matrix2x4
 }
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
 pub enum TexGenSourceType {
-    Tex0(u8),
-    Tex1(u8),
-    Tex2(u8),
-    OrthoProjection(u8),
-    PaneBaseOrthoProjection(u8),
-    PerspectiveProjection(u8)
+    Tex0,
+    Tex1,
+    Tex2,
+    OrthoProjection,
+    PaneBaseOrthoProjection,
+    PerspectiveProjection
+}
+
+impl TexGenSourceType {
+    pub fn from_u8(value: u8) -> TexGenSourceType {
+        let result = match value {
+            0 => TexGenSourceType::Tex0,
+            1 => TexGenSourceType::Tex1,
+            2 => TexGenSourceType::Tex2,
+            3 => TexGenSourceType::OrthoProjection,
+            4 => TexGenSourceType::PaneBaseOrthoProjection,
+            5 => TexGenSourceType::PaneBaseOrthoProjection,
+            6 => TexGenSourceType::PerspectiveProjection,
+            _ => panic!("")
+        };
+
+        result
+    }
 }
 
 #[repr(C)]
@@ -563,84 +695,179 @@ pub struct ResTevStage {
     combine_alpha: TevMode
 }
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
 pub enum TevMode {
-    Replace(u8),
-    Modulate(u8),
-    Add(u8),
-    AddSigned(u8),
-    Interpolate(u8),
-    Subtract(u8),
-    AddMultiply(u8),
-    MultiplyAdd(u8),
-    Overlay(u8),
-    Lighten(u8),
-    Darken(u8),
-    Indirect(u8),
-    BlendIndirect(u8),
-    EachIndirect(u8)
+    Replace,
+    Modulate,
+    Add,
+    AddSigned,
+    Interpolate,
+    Subtract,
+    AddMultiply,
+    MultiplyAdd,
+    Overlay,
+    Lighten,
+    Darken,
+    Indirect,
+    BlendIndirect,
+    EachIndirect
+}
+
+impl TevMode {
+    pub fn from_u8(value: u8) -> TevMode {
+        match value {
+            0 => TevMode::Replace, 
+            1 => TevMode::Modulate, 
+            2 => TevMode::Add, 
+            3 => TevMode::AddSigned,
+            4 => TevMode::Interpolate, 
+            5 => TevMode::Subtract,
+            6 => TevMode::AddMultiply, 
+            7 => TevMode::MultiplyAdd, 
+            8 => TevMode::Overlay, 
+            9 => TevMode::Lighten, 
+            10 => TevMode::Darken, 
+            11 => TevMode::Indirect, 
+            12 => TevMode::BlendIndirect, 
+            13 => TevMode::EachIndirect,
+            _ => panic!("")
+        }
+    }
 }
         
-#[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
 pub enum AlphaTest {
-    Never(u8),
-    Less(u8),
-    LessEqual(u8),
-    Equal(u8),
-    NotEqual(u8),
-    GreaterEqual(u8),
-    Greater(u8),
-    Always(u8)
+    Never,
+    Less,
+    LessEqual,
+    Equal,
+    NotEqual,
+    GreaterEqual,
+    Greater,
+    Always
 }
 
-#[repr(C)]
+impl AlphaTest {
+    pub fn from_u8(value: u8) -> AlphaTest {
+        match value {
+            0 => AlphaTest::Never,
+            1 => AlphaTest::Less,
+            2 => AlphaTest::LessEqual,
+            3 => AlphaTest::Equal,
+            4 => AlphaTest::NotEqual,
+            5 => AlphaTest::GreaterEqual,
+            6 => AlphaTest::Greater,
+            7 => AlphaTest::Always,
+            _ => panic!("")
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
 pub enum Factor {
-    Zero(u8),
-    One(u8),
-    DestColor(u8),
-    InverseDestColor(u8),
-    SrcAlpha(u8),
-    InverseSrcAlpha(u8),
-    DestAlpha(u8),
-    InverseDestAlpha(u8),
-    SrcColor(u8),
-    InverseSrcColor(u8)
+    Zero,
+    One,
+    DestColor,
+    InverseDestColor,
+    SrcAlpha,
+    InverseSrcAlpha,
+    DestAlpha,
+    InverseDestAlpha,
+    SrcColor,
+    InverseSrcColor
 }
 
-#[repr(C)]
+impl Factor {
+    pub fn from_u8(value: u8) -> Factor {
+        match value {
+            0 => Factor::Zero,
+            1 => Factor::One,
+            2 => Factor::DestColor,
+            3 => Factor::InverseDestColor,
+            4 => Factor::SrcAlpha,
+            5 => Factor::InverseSrcAlpha,
+            6 => Factor::DestAlpha,
+            7 => Factor::InverseDestAlpha,
+            8 => Factor::SrcColor,
+            9 => Factor::InverseSrcColor,
+            _ => panic!("")
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
 pub enum BlendOp {
-    Disable(u8),
-    Add(u8),
-    Subtract(u8),
-    ReverseSubtract(u8),
-    SelectMin(u8),
-    SelectMax(u8),
+    Disable,
+    Add,
+    Subtract,
+    ReverseSubtract,
+    SelectMin,
+    SelectMax
 }
 
-#[repr(C)]
+impl BlendOp {
+    pub fn from_u8(value: u8) -> BlendOp {
+        match value {
+            0 => BlendOp::Disable,
+            1 => BlendOp::Add,
+            2 => BlendOp::Subtract,
+            3 => BlendOp::ReverseSubtract,
+            4 => BlendOp::SelectMin,
+            5 => BlendOp::SelectMax,
+            _ => panic!("")
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
 pub enum LogicalOp {
-    Disable(u8),
-    NoOp(u8),
-    Clear(u8),
-    Set(u8),
-    Copy(u8),
-    InvCopy(u8),
-    Inv(u8),
-    And(u8),
-    Nand(u8),
-    Or(u8),
-    Nor(u8),
-    Xor(u8),
-    Equiv(u8),
-    RevAnd(u8),
-    InvAnd(u8),
-    RevOr(u8),
-    InvOr(u8),
+    Disable,
+    NoOp,
+    Clear,
+    Set,
+    Copy,
+    InvCopy,
+    Inv,
+    And,
+    Nand,
+    Or,
+    Nor,
+    Xor,
+    Equiv,
+    RevAnd,
+    InvAnd,
+    RevOr,
+    InvOr,
+}
+
+impl LogicalOp {
+    pub fn from_u8(value: u8) -> LogicalOp {
+        match value {
+            0 => LogicalOp::Disable,
+            1 => LogicalOp::NoOp,
+            2 => LogicalOp::Clear,
+            3 => LogicalOp::Set,
+            4 => LogicalOp::Copy,
+            5 => LogicalOp::InvCopy,
+            6 => LogicalOp::Inv,
+            7 => LogicalOp::And,
+            8 => LogicalOp::Nand,
+            9 => LogicalOp::Or,
+            10 => LogicalOp::Nor,
+            11 => LogicalOp::Xor,
+            12 => LogicalOp::Equiv,
+            13 => LogicalOp::RevAnd,
+            14 => LogicalOp::InvAnd,
+            15 => LogicalOp::RevOr,
+            16 => LogicalOp::InvOr,
+            _ => panic!("")
+        }
+    }
 }
 
 #[repr(C)]
@@ -654,24 +881,40 @@ pub struct ResBlendMode {
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct MaterialListInner {
+    size: u32,
+    material_count: u16,
+    #[br(count = material_count)]
+    offsets: Vec<u32>,
+    #[br(count = material_count)]
+    materials: Vec<ResMaterial>
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResMaterial {
     #[br(dbg)]
     pub name: SerdeNullString,
-    pub mat_black_color: f32,
-    pub mat_white_color: f32,
-    pub resource_count: u32,
-    #[br(count = resource_count & 3)]
+    #[br(dbg)]
+    pub bitflags: i32,
+    #[br(dbg)]
+    pub mat_black_color: ResColorTest,
+    #[br(dbg)]
+    pub mat_white_color: ResColorTest,
+    // #[br(dbg)]
+    // pub resource_count: u32,
+    #[br(count = bitflags & 3)]
     pub texture_maps: Vec<ResTexMap>,
-    #[br(count = (resource_count >> 2) & 3)]
+    #[br(count = (bitflags >> 2) & 3)]
     pub texture_transforms: Vec<ResTexTransform>,
-    #[br(count = (resource_count >> 4) & 3)]
+    #[br(count = (bitflags >> 4) & 3)]
     pub texture_coord_gens: Vec<ResTexCoordGen>,
-    #[br(count = (resource_count >> 6) & 7 )]
+    #[br(count = (bitflags >> 6) & 7 )]
     pub tev_stages: Vec<ResTevStage>,
-    #[br(count = (resource_count >> 9) & 1)]
-    pub alpha_compare: Vec<ResAlphaCompare>,
-    #[br(count = (resource_count >> 10) & 1)]
-    pub blend_mode: Vec<ResBlendMode>
+    #[br(count = (bitflags >> 9) & 1)]
+    pub alpha_compares: Vec<ResAlphaCompare>,
+    #[br(count = (bitflags >> 10) & 1)]
+    pub blend_modes: Vec<ResBlendMode>
 }
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
@@ -711,12 +954,14 @@ pub enum BflytSection {
 
     #[brw(magic = b"mat1")]
     MaterialList {
-        size: u32,
-        material_count: u16,
-        #[br(count = material_count - 4, pad_before = 2)]
-        offsets: Vec<u32>,
-        #[br(parse_with = binrw::file_ptr::parse_from_iter(offsets.iter().copied()))]
-        materials: Vec<ResMaterial>
+        // size: u32,
+        #[br(parse_with = material_list_parser)]
+        material_list: MaterialListInner
+        // material_count: i16,
+        // #[br(count = material_count, pad_before = 2)]
+        // offsets: Vec<u32>,
+        // #[br(parse_with = binrw::file_ptr::parse_from_iter(offsets.iter().copied()), seek_before = SeekFrom::Start(4))]
+        // materials: Vec<ResMaterial>
     },
 
     #[brw(magic = b"wnd1")]
