@@ -1,8 +1,6 @@
 use binrw::io::SeekFrom;
 use binrw::meta::{EndianKind, ReadEndian};
 use binrw::{binread, BinRead, BinResult, NullString, Endian, BinWrite, BinWriterExt, binwrite};
-// use binrw::helpers::args_iter;
-// use binrw::file_ptr::parse_from_iter;
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use serde::de::{self, Visitor};
@@ -420,74 +418,53 @@ fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResu
 
 #[binrw::parser(reader: reader, endian: _endian)]
 fn material_list_parser() -> BinResult<MaterialListInner> {
-    println!("Running material_list_parser");
-    let base_offset = reader.stream_position()? - 8;
-    // let offset = base_offset;
-
+    let base_offset = reader.stream_position()?;
     println!("base_offset: {base_offset}");
-
-    let size = reader.read_u32::<LittleEndian>()?;
 
     let mut materials: Vec<ResMaterial> = Vec::new();
 
-    // println!("{:?}", materials);
-    let material_count = reader.read_u16::<LittleEndian>()?;
+    let material_count: u16 = reader.read_u16::<LittleEndian>()?;
+    
+    println!("material_count: {material_count}");
+
     let _ = reader.seek_relative(2);
 
-    // println!("count: {}, base offset: {}", material_count, base_offset);
     let mut offsets = vec![0u32; material_count as usize];
 
-    reader.read_u32_into::<LittleEndian>(offsets.as_mut_slice())?;
+    reader.read_u32_into::<LittleEndian>(&mut offsets.as_mut_slice())?;
 
-    println!("offsets: {:?}", offsets);
+    offsets = offsets.iter().map(|x| x - 8).collect();
 
     for offset in &offsets {
-        let _ = reader.seek(SeekFrom::Start(base_offset + *offset as u64));
+        let _ = reader.seek(SeekFrom::Start(base_offset + *offset as u64))?;
 
-        let material_size = reader.read_u32::<LittleEndian>().unwrap();
+        // let name = SerdeNullString::read(reader)?;
 
-        // let new_reader = reader.read_exact(&mut bytes)?;
-        // println!("size: {:?}", size);
+        let mut name_buf = vec![0u8;28];
+        reader.read_exact(&mut name_buf)?;
 
-        let name = SerdeNullString::read(reader)?;
+        let name = SerdeNullString(NullString(name_buf));
 
-        let bitflags: i32;
-        let fg_clr: ResColorTest;
-        let bg_clr: ResColorTest;
+        let bitflags = reader.read_u32::<LittleEndian>()?;
 
-        // if version >= 0x08000000 {
-            bitflags = reader.read_i32::<LittleEndian>()?;
-            let _ = reader.seek_relative(2);
-            fg_clr = ResColorTest {
-                r: reader.read_u8()?,
-                g: reader.read_u8()?,
-                b: reader.read_u8()?,
-                a: reader.read_u8()?
-            };
-            bg_clr = ResColorTest {
-                r: reader.read_u8()?,
-                g: reader.read_u8()?,
-                b: reader.read_u8()?,
-                a: reader.read_u8()?
-            };
-        // } else {
-        //     // let _ = reader.seek_relative(2);
-        //     fg_clr = ResColorTest {
-        //         r: reader.read_u8()?,
-        //         g: reader.read_u8()?,
-        //         b: reader.read_u8()?,
-        //         a: reader.read_u8()?
-        //     };
-        //     bg_clr = ResColorTest {
-        //         r: reader.read_u8()?,
-        //         g: reader.read_u8()?,
-        //         b: reader.read_u8()?,
-        //         a: reader.read_u8()?
-        //     };
-        //     bitflags = reader.read_i32::<LittleEndian>()?;
-        // }
-        // let resource_count = reader.read_u32::<LittleEndian>()?;
-        
+        let _unkown = reader.read_i32::<LittleEndian>()?;
+
+        let fg_clr = ResColorTest {
+            r: reader.read_u8()?,
+            g: reader.read_u8()?,
+            b: reader.read_u8()?,
+            a: reader.read_u8()?
+        };
+        let bg_clr = ResColorTest {
+            r: reader.read_u8()?,
+            g: reader.read_u8()?,
+            b: reader.read_u8()?,
+            a: reader.read_u8()?
+        };
+            
+        println!("Material: {:?}", name);
+        println!("  bitflags: {bitflags}, position: {}", reader.stream_position()?);
+
         let texture_map_count = bitflags & 3;
         let mut texture_maps: Vec<ResTexMap> = Vec::new();
 
@@ -505,7 +482,12 @@ fn material_list_parser() -> BinResult<MaterialListInner> {
 
         let blend_mode_count = (bitflags >> 10) & 1;
         let mut blend_modes: Vec<ResBlendMode> = Vec::new();
+
+        let indirect_params_count = (bitflags >> 0) & 1;
+        let mut indirect_params: Vec<ResIndirectParameter> = Vec::new();
         
+        println!("  textures: {texture_map_count},\n  transforms: {texture_transform_count},\n  tex_coords: {tex_coord_gen_count},\n  tev_stages: {tev_stages_count},\n  alpha_comp: {alpha_compare_count},\n  blend_modes: {blend_mode_count},\n  indirect_params: {indirect_params_count}");
+
         for _ in 0..texture_map_count {
             texture_maps.push(ResTexMap {
                 tex_idx: reader.read_u16::<LittleEndian>()?,
@@ -568,7 +550,15 @@ fn material_list_parser() -> BinResult<MaterialListInner> {
             })
         }
 
+        for _ in 0..indirect_params_count {
+            indirect_params.push(ResIndirectParameter {
+                rotate: reader.read_f32::<LittleEndian>()?,
+                scale: ResVec2Test::read(reader)?
+            })
+        }
+
         let mat: ResMaterial = ResMaterial {
+            // size: material_size,
             name,
             bitflags,
             mat_black_color: fg_clr,
@@ -579,14 +569,15 @@ fn material_list_parser() -> BinResult<MaterialListInner> {
             texture_coord_gens,
             tev_stages,
             alpha_compares,
-            blend_modes
+            blend_modes,
+            indirect_params
         };
 
-        println!("mat: {:?}", mat);
+        // println!("mat: {:?}", mat);
         materials.push(mat);
     }
 
-    Ok(MaterialListInner { size, material_count, offsets, materials })
+    Ok(MaterialListInner { /* size, */ material_count, offsets, materials })
 }
 
 // #[repr(C)]
@@ -882,7 +873,7 @@ pub struct ResBlendMode {
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct MaterialListInner {
-    size: u32,
+    // size: u32,
     material_count: u16,
     #[br(count = material_count)]
     offsets: Vec<u32>,
@@ -892,17 +883,19 @@ pub struct MaterialListInner {
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResIndirectParameter {
+    rotate: f32,
+    scale: ResVec2Test
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResMaterial {
-    #[br(dbg)]
+    // pub size: u32,
     pub name: SerdeNullString,
-    #[br(dbg)]
-    pub bitflags: i32,
-    #[br(dbg)]
+    pub bitflags: u32,
     pub mat_black_color: ResColorTest,
-    #[br(dbg)]
     pub mat_white_color: ResColorTest,
-    // #[br(dbg)]
-    // pub resource_count: u32,
     #[br(count = bitflags & 3)]
     pub texture_maps: Vec<ResTexMap>,
     #[br(count = (bitflags >> 2) & 3)]
@@ -914,7 +907,9 @@ pub struct ResMaterial {
     #[br(count = (bitflags >> 9) & 1)]
     pub alpha_compares: Vec<ResAlphaCompare>,
     #[br(count = (bitflags >> 10) & 1)]
-    pub blend_modes: Vec<ResBlendMode>
+    pub blend_modes: Vec<ResBlendMode>,
+    #[br(count = (bitflags >> 0) & 1)]
+    pub indirect_params: Vec<ResIndirectParameter>
 }
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
@@ -954,7 +949,8 @@ pub enum BflytSection {
 
     #[brw(magic = b"mat1")]
     MaterialList {
-        // size: u32,
+        #[br(dbg)]
+        size: u32,
         #[br(parse_with = material_list_parser)]
         material_list: MaterialListInner
         // material_count: i16,
