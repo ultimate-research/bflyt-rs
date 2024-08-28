@@ -129,6 +129,10 @@ pub struct ResColorTest {
     pub a: u8,
 }
 
+impl ReadEndian for ResColorTest {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug, Copy, Clone)]
 pub struct ResVec2Test {
@@ -438,37 +442,43 @@ fn material_list_parser() -> BinResult<MaterialListInner> {
     for offset in &offsets {
         let _ = reader.seek(SeekFrom::Start(base_offset + *offset as u64))?;
 
-        // let name = SerdeNullString::read(reader)?;
+        let name = SerdeNullString::read(reader)?;
 
-        let mut name_buf = vec![0u8;28];
-        reader.read_exact(&mut name_buf)?;
+        let remaining_bytes = 27 - name.0.to_string().len();
 
-        let name = SerdeNullString(NullString(name_buf));
+        if remaining_bytes > 0 {
+            println!("remaining: {remaining_bytes}");
+
+            let _ = reader.seek_relative(remaining_bytes as i64);
+        }
 
         let bitflags = reader.read_u32::<LittleEndian>()?;
 
         let _unkown = reader.read_i32::<LittleEndian>()?;
 
-        let fg_clr = ResColorTest {
-            r: reader.read_u8()?,
-            g: reader.read_u8()?,
-            b: reader.read_u8()?,
-            a: reader.read_u8()?
-        };
-        let bg_clr = ResColorTest {
-            r: reader.read_u8()?,
-            g: reader.read_u8()?,
-            b: reader.read_u8()?,
-            a: reader.read_u8()?
-        };
+        let fg_clr = ResColorTest::read(reader)?;
+        // {
+        //     r: reader.read_u8()?,
+        //     g: reader.read_u8()?,
+        //     b: reader.read_u8()?,
+        //     a: reader.read_u8()?
+        // };
+
+        let bg_clr = ResColorTest::read(reader)?;
+        // {
+        //     r: reader.read_u8()?,
+        //     g: reader.read_u8()?,
+        //     b: reader.read_u8()?,
+        //     a: reader.read_u8()?
+        // };
             
-        println!("Material: {:?}", name);
+        println!("Material: {}", name.0.to_string());
         println!("  bitflags: {bitflags}, position: {}", reader.stream_position()?);
 
         let texture_map_count = bitflags & 3;
         let mut texture_maps: Vec<ResTexMap> = Vec::new();
 
-        let texture_transform_count = (bitflags & 0xC) >> 2;
+        let texture_transform_count = (bitflags >> 2) & 3;
         let mut texture_transforms: Vec<ResTexTransform>= Vec::new();
 
         let tex_coord_gen_count = (bitflags >> 4) & 3;
@@ -477,16 +487,30 @@ fn material_list_parser() -> BinResult<MaterialListInner> {
         let tev_stages_count = (bitflags >> 6) & 7;
         let mut tev_stages: Vec<ResTevStage> = Vec::new();
 
-        let alpha_compare_count = (bitflags >> 9) & 1;
-        let mut alpha_compares: Vec<ResAlphaCompare> = Vec::new();
+        let _has_alpha_compare = ((bitflags >> 9) & 1) != 0;
 
-        let blend_mode_count = (bitflags >> 10) & 1;
-        let mut blend_modes: Vec<ResBlendMode> = Vec::new();
+        let _has_blend_mode = ((bitflags >> 10) & 1) != 0;
 
-        let indirect_params_count = (bitflags >> 0) & 1;
-        let mut indirect_params: Vec<ResIndirectParameter> = Vec::new();
+        let _is_texture_only = ((bitflags >> 11) & 1) != 0;
+
+        let _has_separate_blend_mode = ((bitflags >> 12) & 1) != 0;
+
+        let _has_indirect_param = ((bitflags >> 13) & 1) != 0;
+
+        let projection_tex_gen_count = (bitflags >> 14) & 3;
+        let mut projection_tex_gens: Vec<ResTexProjectionGen> = Vec::new();
+
+        let _has_font_shadow = ((bitflags >> 16) & 1) != 0;
+
+        let _has_alpha_thresholding_interpolation = ((bitflags >> 17) & 1) != 0;
+
+        let _has_detailed_combiner = ((bitflags >> 18) & 1) != 0;
+
+        let _has_combiner_user_shader = ((bitflags >> 19) & 1) != 0;
         
-        println!("  textures: {texture_map_count},\n  transforms: {texture_transform_count},\n  tex_coords: {tex_coord_gen_count},\n  tev_stages: {tev_stages_count},\n  alpha_comp: {alpha_compare_count},\n  blend_modes: {blend_mode_count},\n  indirect_params: {indirect_params_count}");
+        let _has_additional_tex_map_info = ((bitflags >> 20) & 1) != 0;
+        
+        println!("textures: {texture_map_count},\n  transforms: {texture_transform_count},\n  tex_coords: {tex_coord_gen_count},\n  tev_stages: {tev_stages_count}");
 
         for _ in 0..texture_map_count {
             texture_maps.push(ResTexMap {
@@ -527,50 +551,34 @@ fn material_list_parser() -> BinResult<MaterialListInner> {
             });
         }
 
-        for _ in 0..alpha_compare_count {
-            let alpha_test: AlphaTest = AlphaTest::from_u8(reader.read_u8()?);
-
-            alpha_compares.push(ResAlphaCompare {
-                alpha_test,
-                target: reader.read_f32::<LittleEndian>()?
-            })
-        }
-
-        for _ in 0..blend_mode_count {
-            let src_factor = reader.read_u8()?;
-            let dest_factor = reader.read_u8()?;
-            let blend_op = reader.read_u8()?;
-            let logical_op = reader.read_u8()?;
-
-            blend_modes.push(ResBlendMode {
-                src_factor: Factor::from_u8(src_factor),
-                dest_factor: Factor::from_u8(dest_factor),
-                blend_op: BlendOp::from_u8(blend_op),
-                logical_op: LogicalOp::from_u8(logical_op)
-            })
-        }
-
-        for _ in 0..indirect_params_count {
-            indirect_params.push(ResIndirectParameter {
-                rotate: reader.read_f32::<LittleEndian>()?,
-                scale: ResVec2Test::read(reader)?
+        for _ in 0..projection_tex_gen_count {
+            projection_tex_gens.push(ResTexProjectionGen {
+                flag: reader.read_u8()?,
+                reserved: (0..3).map(|_| reader.read_u8().unwrap() ).collect(),
+                scale: ResVec2Test::read(reader)?,
+                translate: ResVec2Test::read(reader)?
             })
         }
 
         let mat: ResMaterial = ResMaterial {
-            // size: material_size,
             name,
             bitflags,
             mat_black_color: fg_clr,
             mat_white_color: bg_clr,
-            // resource_count,
             texture_maps,
             texture_transforms,
             texture_coord_gens,
             tev_stages,
-            alpha_compares,
-            blend_modes,
-            indirect_params
+            // has_alpha_compare,
+            // has_blend_mode,
+            // is_texture_only,
+            // has_separate_blend_mode,
+            // has_indirect_param,
+            // has_font_shadow,
+            // has_alpha_thresholding_interpolation,
+            // has_detailed_combiner,
+            // has_combiner_user_shader,
+            // has_additional_tex_map_info
         };
 
         // println!("mat: {:?}", mat);
@@ -883,6 +891,16 @@ pub struct MaterialListInner {
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResTexProjectionGen {
+    flag: u8,
+    #[br(count = 3)]
+    reserved: Vec<u8>,
+    scale: ResVec2Test,
+    translate: ResVec2Test
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResIndirectParameter {
     rotate: f32,
     scale: ResVec2Test
@@ -891,7 +909,6 @@ pub struct ResIndirectParameter {
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResMaterial {
-    // pub size: u32,
     pub name: SerdeNullString,
     pub bitflags: u32,
     pub mat_black_color: ResColorTest,
@@ -904,12 +921,16 @@ pub struct ResMaterial {
     pub texture_coord_gens: Vec<ResTexCoordGen>,
     #[br(count = (bitflags >> 6) & 7 )]
     pub tev_stages: Vec<ResTevStage>,
-    #[br(count = (bitflags >> 9) & 1)]
-    pub alpha_compares: Vec<ResAlphaCompare>,
-    #[br(count = (bitflags >> 10) & 1)]
-    pub blend_modes: Vec<ResBlendMode>,
-    #[br(count = (bitflags >> 0) & 1)]
-    pub indirect_params: Vec<ResIndirectParameter>
+    // pub has_alpha_compare: bool,
+    // pub has_blend_mode: bool,
+    // pub is_texture_only: bool,
+    // pub has_separate_blend_mode: bool,
+    // pub has_indirect_param: bool,
+    // pub has_font_shadow: bool,
+    // pub has_alpha_thresholding_interpolation: bool,
+    // pub has_detailed_combiner: bool,
+    // pub has_combiner_user_shader: bool,
+    // pub has_additional_tex_map_info: bool
 }
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
