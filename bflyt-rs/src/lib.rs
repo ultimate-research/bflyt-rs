@@ -421,7 +421,7 @@ fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResu
 }
 
 #[binrw::parser(reader: reader, endian: _endian)]
-fn material_list_parser() -> BinResult<MaterialListInner> {
+fn material_list_parser() -> BinResult<MaterialList> {
     let base_offset = reader.stream_position()?;
     println!("base_offset: {base_offset}");
 
@@ -437,190 +437,17 @@ fn material_list_parser() -> BinResult<MaterialListInner> {
 
     reader.read_u32_into::<LittleEndian>(&mut offsets.as_mut_slice())?;
 
+    // -8 bytes to align offsets to the beginning of the list block
     offsets = offsets.iter().map(|x| x - 8).collect();
 
     for offset in &offsets {
         let _ = reader.seek(SeekFrom::Start(base_offset + *offset as u64))?;
 
-        let name = SerdeNullString::read(reader)?;
-
-        let remaining_bytes = 27 - name.0.to_string().len();
-
-        if remaining_bytes > 0 {
-            println!("remaining: {remaining_bytes}");
-
-            let _ = reader.seek_relative(remaining_bytes as i64);
-        }
-
-        let bitflags = reader.read_u32::<LittleEndian>()?;
-
-        let _unkown = reader.read_i32::<LittleEndian>()?;
-
-        let fg_clr = ResColorTest::read(reader)?;
-        // {
-        //     r: reader.read_u8()?,
-        //     g: reader.read_u8()?,
-        //     b: reader.read_u8()?,
-        //     a: reader.read_u8()?
-        // };
-
-        let bg_clr = ResColorTest::read(reader)?;
-        // {
-        //     r: reader.read_u8()?,
-        //     g: reader.read_u8()?,
-        //     b: reader.read_u8()?,
-        //     a: reader.read_u8()?
-        // };
-            
-        println!("Material: {}", name.0.to_string());
-        println!("  bitflags: {bitflags}, position: {}", reader.stream_position()?);
-
-        let texture_map_count = bitflags & 3;
-        let mut texture_maps: Vec<ResTexMap> = Vec::new();
-
-        let texture_transform_count = (bitflags >> 2) & 3;
-        let mut texture_transforms: Vec<ResTexTransform>= Vec::new();
-
-        let tex_coord_gen_count = (bitflags >> 4) & 3;
-        let mut texture_coord_gens: Vec<ResTexCoordGen> = Vec::new();
-
-        let tev_stages_count = (bitflags >> 6) & 7;
-        let mut tev_stages: Vec<ResTevStage> = Vec::new();
-
-        let _has_alpha_compare = ((bitflags >> 9) & 1) != 0;
-
-        let _has_blend_mode = ((bitflags >> 10) & 1) != 0;
-
-        let _is_texture_only = ((bitflags >> 11) & 1) != 0;
-
-        let _has_separate_blend_mode = ((bitflags >> 12) & 1) != 0;
-
-        let _has_indirect_param = ((bitflags >> 13) & 1) != 0;
-
-        let projection_tex_gen_count = (bitflags >> 14) & 3;
-        let mut projection_tex_gens: Vec<ResTexProjectionGen> = Vec::new();
-
-        let _has_font_shadow = ((bitflags >> 16) & 1) != 0;
-
-        let _has_alpha_thresholding_interpolation = ((bitflags >> 17) & 1) != 0;
-
-        let _has_detailed_combiner = ((bitflags >> 18) & 1) != 0;
-
-        let _has_combiner_user_shader = ((bitflags >> 19) & 1) != 0;
-        
-        let _has_additional_tex_map_info = ((bitflags >> 20) & 1) != 0;
-        
-        println!("textures: {texture_map_count},\n  transforms: {texture_transform_count},\n  tex_coords: {tex_coord_gen_count},\n  tev_stages: {tev_stages_count}");
-
-        for _ in 0..texture_map_count {
-            texture_maps.push(ResTexMap {
-                tex_idx: reader.read_u16::<LittleEndian>()?,
-                wrap_s_flt: reader.read_u8()?,
-                wrap_t_flt: reader.read_u8()?
-            });
-        }
-
-        for _ in 0..texture_transform_count {
-            texture_transforms.push(ResTexTransform {
-                rotate: reader.read_f32::<LittleEndian>()?,
-                scale: ResVec2Test {
-                    x: reader.read_f32::<LittleEndian>()?,
-                    y: reader.read_f32::<LittleEndian>()?
-                },
-                translate: ResVec2Test {
-                    x: reader.read_f32::<LittleEndian>()?,
-                    y: reader.read_f32::<LittleEndian>()?
-                },
-            });
-        }
-
-        for _ in 0..tex_coord_gen_count {
-            texture_coord_gens.push(ResTexCoordGen {
-                matrix_type: TexGenType::Matrix2x4,
-                source: TexGenSourceType::from_u8(reader.read_u8()?),
-                test: reader.read_u16::<LittleEndian>()?
-            });
-        }
-
-        for _ in 0..tev_stages_count {
-            let combine_rgb: TevMode = TevMode::from_u8(reader.read_u8()?);
-            let combine_alpha: TevMode = TevMode::from_u8(reader.read_u8()?);
-            tev_stages.push(ResTevStage {
-                combine_rgb,
-                combine_alpha
-            });
-        }
-
-        for _ in 0..projection_tex_gen_count {
-            projection_tex_gens.push(ResTexProjectionGen {
-                flag: reader.read_u8()?,
-                reserved: (0..3).map(|_| reader.read_u8().unwrap() ).collect(),
-                scale: ResVec2Test::read(reader)?,
-                translate: ResVec2Test::read(reader)?
-            })
-        }
-
-        let mat: ResMaterial = ResMaterial {
-            name,
-            bitflags,
-            mat_black_color: fg_clr,
-            mat_white_color: bg_clr,
-            texture_maps,
-            texture_transforms,
-            texture_coord_gens,
-            tev_stages,
-            // has_alpha_compare,
-            // has_blend_mode,
-            // is_texture_only,
-            // has_separate_blend_mode,
-            // has_indirect_param,
-            // has_font_shadow,
-            // has_alpha_thresholding_interpolation,
-            // has_detailed_combiner,
-            // has_combiner_user_shader,
-            // has_additional_tex_map_info
-        };
-
-        // println!("mat: {:?}", mat);
-        materials.push(mat);
+        materials.push(ResMaterial::read(reader)?);
     }
 
-    Ok(MaterialListInner { /* size, */ material_count, offsets, materials })
+    Ok(MaterialList { material_count, offsets, materials })
 }
-
-// #[repr(C)]
-// #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
-// pub enum ResMaterialResource {
-//     ResTexMap {
-//         tex_idx: u16,
-//         wrap_s_flt: u8,
-//         wrap_t_flt: u8
-//     },
-//     ResTexTransform {
-//         rotate: f32,
-//         scale: ResVec2Test,
-//         translate: ResVec2Test
-//     },
-//     ResTexCoordGen {
-//         matrix_type: TexGenType,
-//         source: TexGenSourceType,
-//         test: u16
-//     },
-//     ResTevStage {
-//         combine_rgb: TevMode,
-//         combine_alpha: TevMode
-//     },
-//     ResAlphaCompare {
-//         alpha_test: AlphaTest,
-//         target: f32
-//     },
-//     ResBlendMode {
-//         src_factor: Factor,
-//         dest_factor: Factor,
-//         blend_op: BlendOp,
-//         logical_op: LogicalOp
-//     },
-// }
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 #[brw(repr = u8)]
@@ -664,20 +491,31 @@ pub struct ResTexMap {
     wrap_t_flt: u8
 }
 
+impl ReadEndian for ResTexMap {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResTexTransform {
     rotate: f32,
-    scale: ResVec2Test,
-    translate: ResVec2Test
+    translate: ResVec2Test,
+    scale: ResVec2Test
+}
+
+impl ReadEndian for ResTexTransform {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResTexCoordGen {
     matrix_type: TexGenType,
-    source: TexGenSourceType,
-    test: u16
+    source: TexGenSourceType
+}
+
+impl ReadEndian for ResTexCoordGen {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 #[repr(C)]
@@ -692,6 +530,10 @@ pub struct ResAlphaCompare {
 pub struct ResTevStage {
     combine_rgb: TevMode,
     combine_alpha: TevMode
+}
+
+impl ReadEndian for ResTevStage {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
@@ -880,8 +722,7 @@ pub struct ResBlendMode {
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
-pub struct MaterialListInner {
-    // size: u32,
+pub struct MaterialList {
     material_count: u16,
     #[br(count = material_count)]
     offsets: Vec<u32>,
@@ -899,6 +740,10 @@ pub struct ResTexProjectionGen {
     translate: ResVec2Test
 }
 
+impl ReadEndian for ResTexProjectionGen {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResIndirectParameter {
@@ -909,10 +754,12 @@ pub struct ResIndirectParameter {
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResMaterial {
+    #[br(pad_size_to = 28)]
     pub name: SerdeNullString,
     pub bitflags: u32,
-    pub mat_black_color: ResColorTest,
-    pub mat_white_color: ResColorTest,
+    pub _unknown: u32,
+    pub foreground_color: ResColorTest,
+    pub background_color: ResColorTest,
     #[br(count = bitflags & 3)]
     pub texture_maps: Vec<ResTexMap>,
     #[br(count = (bitflags >> 2) & 3)]
@@ -920,17 +767,26 @@ pub struct ResMaterial {
     #[br(count = (bitflags >> 4) & 3)]
     pub texture_coord_gens: Vec<ResTexCoordGen>,
     #[br(count = (bitflags >> 6) & 7 )]
-    pub tev_stages: Vec<ResTevStage>,
+    pub tev_stages: Vec<ResTevStage>
+
+    // Temp values that will flag conditional fields
+    //
     // pub has_alpha_compare: bool,
     // pub has_blend_mode: bool,
     // pub is_texture_only: bool,
     // pub has_separate_blend_mode: bool,
     // pub has_indirect_param: bool,
+    // #[br(count = (bitflags >> 14) & 3 )]
+    // pub projection_tex_gens: Vec<ResTexProjectionGen>
     // pub has_font_shadow: bool,
     // pub has_alpha_thresholding_interpolation: bool,
     // pub has_detailed_combiner: bool,
     // pub has_combiner_user_shader: bool,
     // pub has_additional_tex_map_info: bool
+}
+
+impl ReadEndian for ResMaterial {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
@@ -970,15 +826,9 @@ pub enum BflytSection {
 
     #[brw(magic = b"mat1")]
     MaterialList {
-        #[br(dbg)]
         size: u32,
         #[br(parse_with = material_list_parser)]
-        material_list: MaterialListInner
-        // material_count: i16,
-        // #[br(count = material_count, pad_before = 2)]
-        // offsets: Vec<u32>,
-        // #[br(parse_with = binrw::file_ptr::parse_from_iter(offsets.iter().copied()), seek_before = SeekFrom::Start(4))]
-        // materials: Vec<ResMaterial>
+        material_list: MaterialList
     },
 
     #[brw(magic = b"wnd1")]
