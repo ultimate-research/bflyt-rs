@@ -26,7 +26,7 @@
 		"vscode": {
 			"extensions": [
 				"rust-lang.rust-analyzer",
-				"serayuzgur.crates",
+				"fill-labs.dependi",
 				"statiolake.vscode-rustfmt",
 				"tamasfe.even-better-toml"
 			]
