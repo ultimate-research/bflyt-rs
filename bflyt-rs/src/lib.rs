@@ -102,6 +102,7 @@ impl ReadEndian for SerdeNullString {
 #[binwrite]
 #[brw(little, magic = b"FLYT")]
 pub struct BflytFile {
+    #[brw(pad_after = 2)]
     header: BflytHeader,
     #[br(count = header.section_count)]
     sections: Vec<BflytSection>,
@@ -116,8 +117,7 @@ pub struct BflytHeader {
     #[br(dbg)]
     version: u32,
     file_size: u32,
-    section_count: u16,
-    padding: u16
+    section_count: u16
 }
 
 #[repr(C)]
@@ -238,8 +238,8 @@ pub struct ResPictureTest {
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug, Default)]
 pub struct ResAnimationInfo {
     pub kind: u32,
-    pub count: u8,
-    pub padding: [u8; 3],
+    #[brw(pad_after = 3)]
+    pub count: u8
 }
 
 impl ReadEndian for ResAnimationInfo {
@@ -252,8 +252,8 @@ pub struct ResPerCharacterTransform {
     pub eval_time_width: f32,
     pub loop_type: u8,
     pub origin_v: u8,
-    pub has_animation_info: u8,
-    pub padding: [u8; 1],
+    #[brw(pad_after = 1)]
+    pub has_animation_info: u8
 }
 
 impl ReadEndian for ResPerCharacterTransform {
@@ -687,8 +687,8 @@ pub enum ScreenOriginType {
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct Layout {
+    #[brw(pad_after = 3)]
     origin_type: ScreenOriginType,
-    #[brw(pad_before = 3)]
     layout_size: ResVec2Test,
     part_size: ResVec2Test,
     name: SerdeNullString
