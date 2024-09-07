@@ -215,8 +215,8 @@ pub struct ResFont {
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct FontListInner {
+    #[brw(pad_after = 2)]
     pub font_count: u16,
-    padding: u16,
     #[br(count = font_count)]
     pub fonts: Vec<ResFont>,
     #[br(count = font_count)]
@@ -886,7 +886,6 @@ pub enum BflytSection {
     #[brw(magic = b"fnl1")]
     FontList {
         size: u32,
-        // #[brw(align_after = 4)]
         #[br(pad_size_to = size as usize - 8)]
         font_list: FontListInner
     },
