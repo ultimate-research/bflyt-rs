@@ -466,23 +466,6 @@ pub enum TexGenSourceType {
     PerspectiveProjection
 }
 
-impl TexGenSourceType {
-    pub fn from_u8(value: u8) -> TexGenSourceType {
-        let result = match value {
-            0 => TexGenSourceType::Tex0,
-            1 => TexGenSourceType::Tex1,
-            2 => TexGenSourceType::Tex2,
-            3 => TexGenSourceType::OrthoProjection,
-            4 => TexGenSourceType::PaneBaseOrthoProjection,
-            5 => TexGenSourceType::PaneBaseOrthoProjection,
-            6 => TexGenSourceType::PerspectiveProjection,
-            _ => panic!("")
-        };
-
-        result
-    }
-}
-
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub struct ResTexMap {
@@ -554,28 +537,6 @@ pub enum TevMode {
     BlendIndirect,
     EachIndirect
 }
-
-impl TevMode {
-    pub fn from_u8(value: u8) -> TevMode {
-        match value {
-            0 => TevMode::Replace, 
-            1 => TevMode::Modulate, 
-            2 => TevMode::Add, 
-            3 => TevMode::AddSigned,
-            4 => TevMode::Interpolate, 
-            5 => TevMode::Subtract,
-            6 => TevMode::AddMultiply, 
-            7 => TevMode::MultiplyAdd, 
-            8 => TevMode::Overlay, 
-            9 => TevMode::Lighten, 
-            10 => TevMode::Darken, 
-            11 => TevMode::Indirect, 
-            12 => TevMode::BlendIndirect, 
-            13 => TevMode::EachIndirect,
-            _ => panic!("")
-        }
-    }
-}
         
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 #[brw(repr = u8)]
@@ -588,22 +549,6 @@ pub enum AlphaTest {
     GreaterEqual,
     Greater,
     Always
-}
-
-impl AlphaTest {
-    pub fn from_u8(value: u8) -> AlphaTest {
-        match value {
-            0 => AlphaTest::Never,
-            1 => AlphaTest::Less,
-            2 => AlphaTest::LessEqual,
-            3 => AlphaTest::Equal,
-            4 => AlphaTest::NotEqual,
-            5 => AlphaTest::GreaterEqual,
-            6 => AlphaTest::Greater,
-            7 => AlphaTest::Always,
-            _ => panic!("")
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
@@ -621,24 +566,6 @@ pub enum Factor {
     InverseSrcColor
 }
 
-impl Factor {
-    pub fn from_u8(value: u8) -> Factor {
-        match value {
-            0 => Factor::Zero,
-            1 => Factor::One,
-            2 => Factor::DestColor,
-            3 => Factor::InverseDestColor,
-            4 => Factor::SrcAlpha,
-            5 => Factor::InverseSrcAlpha,
-            6 => Factor::DestAlpha,
-            7 => Factor::InverseDestAlpha,
-            8 => Factor::SrcColor,
-            9 => Factor::InverseSrcColor,
-            _ => panic!("")
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 #[brw(repr = u8)]
 pub enum BlendOp {
@@ -648,20 +575,6 @@ pub enum BlendOp {
     ReverseSubtract,
     SelectMin,
     SelectMax
-}
-
-impl BlendOp {
-    pub fn from_u8(value: u8) -> BlendOp {
-        match value {
-            0 => BlendOp::Disable,
-            1 => BlendOp::Add,
-            2 => BlendOp::Subtract,
-            3 => BlendOp::ReverseSubtract,
-            4 => BlendOp::SelectMin,
-            5 => BlendOp::SelectMax,
-            _ => panic!("")
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
@@ -684,31 +597,6 @@ pub enum LogicalOp {
     InvAnd,
     RevOr,
     InvOr,
-}
-
-impl LogicalOp {
-    pub fn from_u8(value: u8) -> LogicalOp {
-        match value {
-            0 => LogicalOp::Disable,
-            1 => LogicalOp::NoOp,
-            2 => LogicalOp::Clear,
-            3 => LogicalOp::Set,
-            4 => LogicalOp::Copy,
-            5 => LogicalOp::InvCopy,
-            6 => LogicalOp::Inv,
-            7 => LogicalOp::And,
-            8 => LogicalOp::Nand,
-            9 => LogicalOp::Or,
-            10 => LogicalOp::Nor,
-            11 => LogicalOp::Xor,
-            12 => LogicalOp::Equiv,
-            13 => LogicalOp::RevAnd,
-            14 => LogicalOp::InvAnd,
-            15 => LogicalOp::RevOr,
-            16 => LogicalOp::InvOr,
-            _ => panic!("")
-        }
-    }
 }
 
 #[repr(C)]
@@ -786,6 +674,27 @@ pub struct ResMaterial {
 }
 
 impl ReadEndian for ResMaterial {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
+pub enum ScreenOriginType {
+    Classic, // Origin is top left corner of layout
+    Normal // Origin is in the center of the layout
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct Layout {
+    origin_type: ScreenOriginType,
+    #[brw(pad_before = 3)]
+    layout_size: ResVec2Test,
+    part_size: ResVec2Test,
+    name: SerdeNullString
+}
+
+impl ReadEndian for Layout {
     const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
@@ -879,8 +788,8 @@ pub enum BflytSection {
     #[brw(magic = b"lyt1")]
     Layout {
         size: u32,
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        #[brw(pad_size_to = size - 8)]
+        layout: Layout
     },
 
     #[brw(magic = b"fnl1")]
