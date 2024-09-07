@@ -27,7 +27,6 @@
 			"extensions": [
 				"rust-lang.rust-analyzer",
 				"fill-labs.dependi",
-				"statiolake.vscode-rustfmt",
 				"tamasfe.even-better-toml"
 			]
 		}
