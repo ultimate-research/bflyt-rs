@@ -1,5 +1,4 @@
 **/target
-**/Cargo.lock
 
 **/*.bflyt
 **/*out*.json
