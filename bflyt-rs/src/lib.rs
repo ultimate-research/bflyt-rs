@@ -214,7 +214,7 @@ pub struct ResFont {
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
-pub struct FontListInner {
+pub struct FontList {
     #[brw(pad_after = 2)]
     pub font_count: u16,
     #[br(count = font_count)]
@@ -356,8 +356,8 @@ pub struct ResPartsPaneBasicInfo {
     pub rotate: ResVec3Test,
     pub scale: ResVec2Test,
     pub size: ResVec2Test,
+    #[brw(pad_after = 3)]
     pub alpha: u8,
-    padding: [u8; 3]
 }
 
 fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResult<ResPartsTest> {
@@ -795,8 +795,8 @@ pub enum BflytSection {
     #[brw(magic = b"fnl1")]
     FontList {
         size: u32,
-        #[br(pad_size_to = size as usize - 8)]
-        font_list: FontListInner
+        #[br(pad_size_to = size - 8)]
+        font_list: FontList
     },
 
     #[brw(magic = b"usd1")]
