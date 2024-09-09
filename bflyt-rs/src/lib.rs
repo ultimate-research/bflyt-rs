@@ -1,6 +1,6 @@
 use binrw::io::SeekFrom;
 use binrw::meta::{EndianKind, ReadEndian};
-use binrw::{binread, BinRead, BinResult, NullString, Endian, BinWrite, BinWriterExt, binwrite};
+use binrw::{binread, BinRead, BinResult, NullString, Endian, BinWrite, BinWriterExt, binwrite, file_ptr::parse_from_iter};
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use serde::de::{self, Visitor};
@@ -175,30 +175,24 @@ impl ReadEndian for ResPaneTest {
     const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
-fn texture_list_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResult<TextureListInner> {
-    let mut texture_names: Vec<SerdeNullString> = Vec::new();
-
-    let tex_count = reader.read_i32::<LittleEndian>()?;
-    let base_offset = reader.stream_position()?;
-
-    let mut offsets = vec![0i32; tex_count as usize];
-    reader.read_i32_into::<LittleEndian>(offsets.as_mut_slice())?;
-    for offset in &offsets {
-        reader.seek(SeekFrom::Start(base_offset + *offset as u64))?;
-        texture_names.push(SerdeNullString::read(reader)?);
-    }
-
-    Ok(TextureListInner { tex_count, offsets, texture_names })
-}
-
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
-pub struct TextureListInner {
+#[br(stream = reader)]
+pub struct TextureList {
     pub tex_count: i32,
+    #[br(calc = reader.stream_position()?)]
+    pub base_offset: u64,
     #[br(count = tex_count)]
     pub offsets: Vec<i32>,
-    #[br(count = tex_count)]
+    #[br(
+        seek_before = SeekFrom::Start(base_offset),
+        parse_with = parse_from_iter(offsets.iter().copied())
+    )]
     pub texture_names: Vec<SerdeNullString>
+}
+
+impl ReadEndian for TextureList  {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 #[repr(C)]
@@ -415,35 +409,6 @@ fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResu
     Ok(parts)
 }
 
-#[binrw::parser(reader: reader, endian: _endian)]
-fn material_list_parser() -> BinResult<MaterialList> {
-    let base_offset = reader.stream_position()?;
-    println!("base_offset: {base_offset}");
-
-    let mut materials: Vec<ResMaterial> = Vec::new();
-
-    let material_count: u16 = reader.read_u16::<LittleEndian>()?;
-    
-    println!("material_count: {material_count}");
-
-    let _ = reader.seek_relative(2);
-
-    let mut offsets = vec![0u32; material_count as usize];
-
-    reader.read_u32_into::<LittleEndian>(&mut offsets.as_mut_slice())?;
-
-    // -8 bytes to align offsets to the beginning of the list block
-    offsets = offsets.iter().map(|x| x - 8).collect();
-
-    for offset in &offsets {
-        let _ = reader.seek(SeekFrom::Start(base_offset + *offset as u64))?;
-
-        materials.push(ResMaterial::read(reader)?);
-    }
-
-    Ok(MaterialList { material_count, offsets, materials })
-}
-
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 #[brw(repr = u8)]
 pub enum TexGenType {
@@ -605,11 +570,18 @@ pub struct ResBlendMode {
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[br(stream = reader)]
 pub struct MaterialList {
+    #[br(calc = reader.stream_position()? - 8)]
+    base_offset: u64,
+    #[brw(pad_after = 2)]
     material_count: u16,
     #[br(count = material_count)]
     offsets: Vec<u32>,
-    #[br(count = material_count)]
+    #[br(
+        seek_before = SeekFrom::Start(base_offset),
+        parse_with = parse_from_iter(offsets.iter().copied())
+    )]
     materials: Vec<ResMaterial>
 }
 
@@ -650,7 +622,7 @@ pub struct ResMaterial {
     #[br(count = (bitflags >> 4) & 3)]
     pub texture_coord_gens: Vec<ResTexCoordGen>,
     #[br(count = (bitflags >> 6) & 7 )]
-    pub tev_stages: Vec<ResTevStage>
+    pub tev_stages: Vec<ResTevStage>,
 
     // Temp values that will flag conditional fields
     //
@@ -704,9 +676,8 @@ pub enum BflytSection {
     #[brw(magic = b"txl1")]
     TextureList {
         size: u32,
-        #[br(parse_with = texture_list_parser)]
         #[brw(align_after = 4)]
-        texture_list: TextureListInner
+        texture_list: TextureList
     },
 
     #[brw(magic = b"pic1")]
@@ -731,7 +702,6 @@ pub enum BflytSection {
     #[brw(magic = b"mat1")]
     MaterialList {
         size: u32,
-        #[br(parse_with = material_list_parser)]
         material_list: MaterialList
     },
 
