@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Mode::Pack { file, .. } => {
             let output_path = args.out.as_ref().map_or("out.bflyt", String::as_str);
             let input_json = std::fs::read_to_string(file)?;
-            let bflyt : BflytFile = serde_json::from_str(&input_json)?;
+            let bflyt: BflytFile = serde_json::from_str(&input_json)?;
 
             bflyt.write_to_file(output_path)?;
         }

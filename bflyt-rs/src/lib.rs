@@ -96,7 +96,6 @@ impl ReadEndian for SerdeNullString {
     const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
 #[binread]
 #[binwrite]
@@ -166,14 +165,10 @@ pub struct ResPaneTest {
     #[serde(serialize_with = "cstr_serialize", deserialize_with = "cstr_deserialize")]
     pub name: [u8; 24],
     pub user_data: [u8; 8],
-    pub pos: ResVec3Test,
-    pub rot_x: f32,
-    pub rot_y: f32,
-    pub rot_z: f32,
-    pub scale_x: f32,
-    pub scale_y: f32,
-    pub size_x: f32,
-    pub size_y: f32,
+    pub translation: ResVec3Test,
+    pub rotation: ResVec3Test,
+    pub scale: ResVec2Test,
+    pub size: ResVec2Test,
 }
 
 impl ReadEndian for ResPaneTest {
