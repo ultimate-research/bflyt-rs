@@ -1,13 +1,9 @@
-use binrw::io::{Cursor, SeekFrom, TakeSeekExt};
+use binrw::io::SeekFrom;
 use binrw::meta::{EndianKind, ReadEndian};
-use binrw::{binread, BinRead, BinResult, NullString, Endian, BinWrite, BinWriterExt, binwrite};
+use binrw::{binread, BinRead, BinResult, NullString, Endian, BinWrite, BinWriterExt, binwrite, file_ptr::parse_from_iter};
 use byteorder::{LittleEndian, ReadBytesExt}; // 1.2.7
-use nnsdk::ui2d::{
-    ResColor, ResPane, ResPicture as ResPictureBase, ResTextBox as ResTextBoxBase, ResVec2, ResVec3
-};
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use serde::de::{self, Visitor};
-use std::ptr::null;
 use std::{
     fs::File,
     io::{Read, Seek},
@@ -100,12 +96,12 @@ impl ReadEndian for SerdeNullString {
     const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
 #[binread]
 #[binwrite]
 #[brw(little, magic = b"FLYT")]
 pub struct BflytFile {
+    #[brw(pad_after = 2)]
     header: BflytHeader,
     #[br(count = header.section_count)]
     sections: Vec<BflytSection>,
@@ -117,10 +113,10 @@ pub struct BflytFile {
 pub struct BflytHeader {
     byte_order: u16,
     header_size: u16,
+    #[br(dbg)]
     version: u32,
     file_size: u32,
-    section_count: u16,
-    padding: u16
+    section_count: u16
 }
 
 #[repr(C)]
@@ -130,6 +126,10 @@ pub struct ResColorTest {
     pub g: u8,
     pub b: u8,
     pub a: u8,
+}
+
+impl ReadEndian for ResColorTest {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 #[repr(C)]
@@ -165,44 +165,51 @@ pub struct ResPaneTest {
     #[serde(serialize_with = "cstr_serialize", deserialize_with = "cstr_deserialize")]
     pub name: [u8; 24],
     pub user_data: [u8; 8],
-    pub pos: ResVec3Test,
-    pub rot_x: f32,
-    pub rot_y: f32,
-    pub rot_z: f32,
-    pub scale_x: f32,
-    pub scale_y: f32,
-    pub size_x: f32,
-    pub size_y: f32,
+    pub translation: ResVec3Test,
+    pub rotation: ResVec3Test,
+    pub scale: ResVec2Test,
+    pub size: ResVec2Test,
 }
 
 impl ReadEndian for ResPaneTest {
     const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
-fn texture_list_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResult<TextureListInner> {
-    let mut texture_names: Vec<SerdeNullString> = Vec::new();
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[br(stream = reader)]
+pub struct TextureList {
+    pub tex_count: i32,
+    #[br(calc = reader.stream_position()?)]
+    pub base_offset: u64,
+    #[br(count = tex_count)]
+    pub offsets: Vec<i32>,
+    #[br(
+        seek_before = SeekFrom::Start(base_offset),
+        parse_with = parse_from_iter(offsets.iter().copied())
+    )]
+    pub texture_names: Vec<SerdeNullString>
+}
 
-    let tex_count = reader.read_i32::<LittleEndian>()?;
-    let base_offset = reader.stream_position()?;
-
-    let mut offsets = vec![0i32; tex_count as usize];
-    reader.read_i32_into::<LittleEndian>(offsets.as_mut_slice())?;
-    for offset in &offsets {
-        reader.seek(SeekFrom::Start(base_offset + *offset as u64))?;
-        texture_names.push(SerdeNullString::read(reader)?);
-    }
-
-    Ok(TextureListInner { tex_count, offsets, texture_names })
+impl ReadEndian for TextureList  {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
 }
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
-pub struct TextureListInner {
-    pub tex_count: i32,
-    #[br(count = tex_count)]
-    pub offsets: Vec<i32>,
-    #[br(count = tex_count)]
-    pub texture_names: Vec<SerdeNullString>
+pub struct ResFont {
+    pub offset: u32
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct FontList {
+    #[brw(pad_after = 2)]
+    pub font_count: u16,
+    #[br(count = font_count)]
+    pub fonts: Vec<ResFont>,
+    #[br(count = font_count)]
+    pub font_names: Vec<SerdeNullString>
 }
 
 #[repr(C)]
@@ -220,8 +227,8 @@ pub struct ResPictureTest {
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug, Default)]
 pub struct ResAnimationInfo {
     pub kind: u32,
-    pub count: u8,
-    pub padding: [u8; 3],
+    #[brw(pad_after = 3)]
+    pub count: u8
 }
 
 impl ReadEndian for ResAnimationInfo {
@@ -234,8 +241,8 @@ pub struct ResPerCharacterTransform {
     pub eval_time_width: f32,
     pub loop_type: u8,
     pub origin_v: u8,
-    pub has_animation_info: u8,
-    pub padding: [u8; 1],
+    #[brw(pad_after = 1)]
+    pub has_animation_info: u8
 }
 
 impl ReadEndian for ResPerCharacterTransform {
@@ -338,8 +345,8 @@ pub struct ResPartsPaneBasicInfo {
     pub rotate: ResVec3Test,
     pub scale: ResVec2Test,
     pub size: ResVec2Test,
+    #[brw(pad_after = 3)]
     pub alpha: u8,
-    padding: [u8; 3]
 }
 
 fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResult<ResPartsTest> {
@@ -403,6 +410,262 @@ fn res_parts_parser<R: Read + Seek>(reader: &mut R, _: Endian, _: ()) -> BinResu
 }
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
+pub enum TexGenType {
+    Matrix2x4
+}
+
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
+pub enum TexGenSourceType {
+    Tex0,
+    Tex1,
+    Tex2,
+    OrthoProjection,
+    PaneBaseOrthoProjection,
+    PerspectiveProjection
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResTexMap {
+    tex_idx: u16,
+    wrap_s_flt: u8,
+    wrap_t_flt: u8
+}
+
+impl ReadEndian for ResTexMap {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResTexTransform {
+    rotate: f32,
+    translate: ResVec2Test,
+    scale: ResVec2Test
+}
+
+impl ReadEndian for ResTexTransform {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResTexCoordGen {
+    matrix_type: TexGenType,
+    source: TexGenSourceType
+}
+
+impl ReadEndian for ResTexCoordGen {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResAlphaCompare {
+    alpha_test: AlphaTest,
+    target: f32
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResTevStage {
+    combine_rgb: TevMode,
+    combine_alpha: TevMode
+}
+
+impl ReadEndian for ResTevStage {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
+pub enum TevMode {
+    Replace,
+    Modulate,
+    Add,
+    AddSigned,
+    Interpolate,
+    Subtract,
+    AddMultiply,
+    MultiplyAdd,
+    Overlay,
+    Lighten,
+    Darken,
+    Indirect,
+    BlendIndirect,
+    EachIndirect
+}
+        
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
+pub enum AlphaTest {
+    Never,
+    Less,
+    LessEqual,
+    Equal,
+    NotEqual,
+    GreaterEqual,
+    Greater,
+    Always
+}
+
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
+pub enum Factor {
+    Zero,
+    One,
+    DestColor,
+    InverseDestColor,
+    SrcAlpha,
+    InverseSrcAlpha,
+    DestAlpha,
+    InverseDestAlpha,
+    SrcColor,
+    InverseSrcColor
+}
+
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
+pub enum BlendOp {
+    Disable,
+    Add,
+    Subtract,
+    ReverseSubtract,
+    SelectMin,
+    SelectMax
+}
+
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
+pub enum LogicalOp {
+    Disable,
+    NoOp,
+    Clear,
+    Set,
+    Copy,
+    InvCopy,
+    Inv,
+    And,
+    Nand,
+    Or,
+    Nor,
+    Xor,
+    Equiv,
+    RevAnd,
+    InvAnd,
+    RevOr,
+    InvOr,
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResBlendMode {
+    pub src_factor: Factor,
+    pub dest_factor: Factor,
+    pub blend_op: BlendOp,
+    pub logical_op: LogicalOp
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[br(stream = reader)]
+pub struct MaterialList {
+    #[br(calc = reader.stream_position()? - 8)]
+    base_offset: u64,
+    #[brw(pad_after = 2)]
+    material_count: u16,
+    #[br(count = material_count)]
+    offsets: Vec<u32>,
+    #[br(
+        seek_before = SeekFrom::Start(base_offset),
+        parse_with = parse_from_iter(offsets.iter().copied())
+    )]
+    materials: Vec<ResMaterial>
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResTexProjectionGen {
+    flag: u8,
+    #[br(count = 3)]
+    reserved: Vec<u8>,
+    scale: ResVec2Test,
+    translate: ResVec2Test
+}
+
+impl ReadEndian for ResTexProjectionGen {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResIndirectParameter {
+    rotate: f32,
+    scale: ResVec2Test
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct ResMaterial {
+    #[br(pad_size_to = 28)]
+    pub name: SerdeNullString,
+    pub bitflags: u32,
+    pub _unknown: u32,
+    pub foreground_color: ResColorTest,
+    pub background_color: ResColorTest,
+    #[br(count = bitflags & 3)]
+    pub texture_maps: Vec<ResTexMap>,
+    #[br(count = (bitflags >> 2) & 3)]
+    pub texture_transforms: Vec<ResTexTransform>,
+    #[br(count = (bitflags >> 4) & 3)]
+    pub texture_coord_gens: Vec<ResTexCoordGen>,
+    #[br(count = (bitflags >> 6) & 7 )]
+    pub tev_stages: Vec<ResTevStage>,
+
+    // Temp values that will flag conditional fields
+    //
+    // pub has_alpha_compare: bool,
+    // pub has_blend_mode: bool,
+    // pub is_texture_only: bool,
+    // pub has_separate_blend_mode: bool,
+    // pub has_indirect_param: bool,
+    // #[br(count = (bitflags >> 14) & 3 )]
+    // pub projection_tex_gens: Vec<ResTexProjectionGen>
+    // pub has_font_shadow: bool,
+    // pub has_alpha_thresholding_interpolation: bool,
+    // pub has_detailed_combiner: bool,
+    // pub has_combiner_user_shader: bool,
+    // pub has_additional_tex_map_info: bool
+}
+
+impl ReadEndian for ResMaterial {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+#[brw(repr = u8)]
+pub enum ScreenOriginType {
+    Classic, // Origin is top left corner of layout
+    Normal // Origin is in the center of the layout
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
+pub struct Layout {
+    #[brw(pad_after = 3)]
+    origin_type: ScreenOriginType,
+    layout_size: ResVec2Test,
+    part_size: ResVec2Test,
+    name: SerdeNullString
+}
+
+impl ReadEndian for Layout {
+    const ENDIAN: EndianKind = EndianKind::Endian(Endian::Little);
+}
+
+#[derive(Serialize, Deserialize, BinRead, BinWrite, Debug)]
 pub enum BflytSection {
     #[brw(magic = b"pan1")]
     Pane {
@@ -413,9 +676,8 @@ pub enum BflytSection {
     #[brw(magic = b"txl1")]
     TextureList {
         size: u32,
-        #[br(parse_with = texture_list_parser)]
         #[brw(align_after = 4)]
-        texture_list: TextureListInner
+        texture_list: TextureList
     },
 
     #[brw(magic = b"pic1")]
@@ -438,10 +700,9 @@ pub enum BflytSection {
     },
 
     #[brw(magic = b"mat1")]
-    Material {
+    MaterialList {
         size: u32,
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        material_list: MaterialList
     },
 
     #[brw(magic = b"wnd1")]
@@ -492,15 +753,15 @@ pub enum BflytSection {
     #[brw(magic = b"lyt1")]
     Layout {
         size: u32,
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        #[brw(pad_size_to = size - 8)]
+        layout: Layout
     },
 
     #[brw(magic = b"fnl1")]
     FontList {
         size: u32,
-        #[br(count = size as usize - 8)]
-        data: Vec<u8>,
+        #[br(pad_size_to = size - 8)]
+        font_list: FontList
     },
 
     #[brw(magic = b"usd1")]
